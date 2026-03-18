@@ -693,6 +693,15 @@
         body: JSON.stringify({ message: text }),
       });
 
+      if (!response.ok) {
+        typingEl.remove();
+        appendMessage('assistant', `Request failed (${response.status}). Please try again.`);
+        isStreaming = false;
+        sendBtn.disabled = false;
+        loadConversations();
+        return;
+      }
+
       const reader = response.body.getReader();
       activeReader = reader;
       const decoder = new TextDecoder();

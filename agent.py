@@ -59,7 +59,7 @@ TOOLS = [
 
 async def execute_command(command: str, timeout: int | None = None) -> dict:
     """Execute a shell command and return the result."""
-    timeout = timeout or COMMAND_TIMEOUT
+    timeout = timeout if timeout is not None else COMMAND_TIMEOUT
     try:
         process = await asyncio.create_subprocess_shell(
             command,

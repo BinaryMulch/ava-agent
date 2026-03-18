@@ -241,5 +241,4 @@ async def index():
 
 if __name__ == "__main__":
     import uvicorn
-    db.init_db()
     uvicorn.run(app, host=HOST, port=PORT)
