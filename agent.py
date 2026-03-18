@@ -143,6 +143,7 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
 
     Always keeps at least the last 10 messages. Removes oldest messages first,
     but never breaks up a tool_calls/tool sequence (keeps assistant+tool groups intact).
+    Ensures the result starts with a 'user' message (after system prompt is prepended).
     """
     if not messages:
         return messages
@@ -155,22 +156,30 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
     min_keep = min(10, len(messages))
     trimmed = list(messages)
 
-    while len(trimmed) > min_keep:
-        total = sum(_estimate_tokens(json.dumps(m)) for m in trimmed)
-        if total <= max_tokens:
-            break
-        # Remove the oldest message, but skip tool messages that would be orphaned
+    while len(trimmed) > min_keep and total > max_tokens:
         msg = trimmed[0]
         if msg["role"] == "tool":
-            # Remove orphaned tool message
-            trimmed.pop(0)
+            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
         elif msg["role"] == "assistant" and msg.get("tool_calls"):
-            # Remove assistant + its subsequent tool results as a group
-            trimmed.pop(0)
-            while trimmed and trimmed[0]["role"] == "tool":
-                trimmed.pop(0)
+            # Calculate group size before removing
+            group_size = 1
+            while (group_size < len(trimmed)
+                   and trimmed[group_size]["role"] == "tool"):
+                group_size += 1
+            # Only remove if we'd stay at or above min_keep
+            if len(trimmed) - group_size >= min_keep:
+                for _ in range(group_size):
+                    total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+            else:
+                break
         else:
-            trimmed.pop(0)
+            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+
+    # Ensure conversation doesn't start with orphaned tool/assistant+tool_calls messages
+    while (trimmed and trimmed[0]["role"] in ("tool",)
+           or (trimmed and trimmed[0]["role"] == "assistant"
+               and trimmed[0].get("tool_calls"))):
+        total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
     return trimmed
 
@@ -194,6 +203,11 @@ async def stream_response(messages: list[dict]):
     for _round in range(MAX_TOOL_ROUNDS):
         full_content = ""
         tool_calls_acc = {}  # Accumulate streaming tool calls by index
+
+        # Re-trim before each API call (conversation grows during tool rounds)
+        if _round > 0:
+            system_msg = conversation[0]
+            conversation = [system_msg] + _trim_messages(conversation[1:])
 
         stream = await client.chat.completions.create(
             model=XAI_MODEL,

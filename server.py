@@ -6,9 +6,8 @@ Web API and SSE streaming endpoints.
 import json
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 from pathlib import Path
 

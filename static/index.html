@@ -827,11 +827,14 @@
     const lines = html.split('\n');
     const processed = [];
     let inList = null; // 'ul' or 'ol'
+    let inBlockquote = false;
+    let bqContent = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       // Headers
       const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
       if (headerMatch) {
+        if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
         if (inList) { processed.push(`</${inList}>`); inList = null; }
         const level = headerMatch[1].length;
         processed.push(`<h${level}>${headerMatch[2]}</h${level}>`);
@@ -840,6 +843,7 @@
       // Unordered list items
       const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
       if (ulMatch) {
+        if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
         if (inList !== 'ul') {
           if (inList) processed.push(`</${inList}>`);
           processed.push('<ul>');
@@ -851,6 +855,7 @@
       // Ordered list items
       const olMatch = line.match(/^\d+\.\s+(.+)$/);
       if (olMatch) {
+        if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
         if (inList !== 'ol') {
           if (inList) processed.push(`</${inList}>`);
           processed.push('<ol>');
@@ -863,13 +868,16 @@
       const bqMatch = line.match(/^&gt;\s?(.*)$/);
       if (bqMatch) {
         if (inList) { processed.push(`</${inList}>`); inList = null; }
-        processed.push(`<blockquote>${bqMatch[1]}</blockquote>`);
+        inBlockquote = true;
+        bqContent.push(bqMatch[1]);
         continue;
       }
       // Regular line
+      if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
       if (inList) { processed.push(`</${inList}>`); inList = null; }
       processed.push(line);
     }
+    if (inBlockquote) processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`);
     if (inList) processed.push(`</${inList}>`);
     // Join with <br>, but don't add <br> after block elements
     html = processed.reduce((acc, line, i) => {

@@ -111,6 +111,7 @@ def rename_conversation(conv_id: str, title: str) -> bool:
 def add_message(conversation_id: str, role: str, content: str,
                 tool_calls: list | None = None, tool_call_id: str | None = None) -> dict:
     """Add a message to a conversation."""
+    content = content or ""
     now = datetime.now(timezone.utc).isoformat()
     tool_calls_json = json.dumps(tool_calls) if tool_calls else None
     with get_db() as conn:
