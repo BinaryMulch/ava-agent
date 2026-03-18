@@ -1,0 +1,225 @@
+"""
+Ava Agent - Core Agent Logic
+Handles LLM interaction and tool execution.
+"""
+
+import subprocess
+import json
+import asyncio
+from openai import AsyncOpenAI
+
+from config import (
+    XAI_API_KEY,
+    XAI_BASE_URL,
+    XAI_MODEL,
+    SYSTEM_PROMPT,
+    COMMAND_TIMEOUT,
+    REPO_DIR,
+    SERVICE_NAME,
+)
+
+# Initialize the OpenAI-compatible client for xAI
+client = AsyncOpenAI(
+    api_key=XAI_API_KEY,
+    base_url=XAI_BASE_URL,
+)
+
+# Tool definitions for the LLM
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_command",
+            "description": (
+                "Execute a bash command on the system with root privileges. "
+                "Use this for ANY system operation: running programs, managing files, "
+                "installing packages, configuring services, networking, etc. "
+                "Returns stdout, stderr, and the exit code."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The bash command to execute.",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": f"Timeout in seconds (default: {COMMAND_TIMEOUT}).",
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    }
+]
+
+
+def execute_command(command: str, timeout: int | None = None) -> dict:
+    """Execute a shell command and return the result."""
+    timeout = timeout or COMMAND_TIMEOUT
+    try:
+        result = subprocess.run(
+            ["bash", "-c", command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "stdout": "",
+            "stderr": f"Command timed out after {timeout} seconds",
+            "exit_code": -1,
+        }
+    except Exception as e:
+        return {
+            "stdout": "",
+            "stderr": str(e),
+            "exit_code": -1,
+        }
+
+
+def handle_tool_call(name: str, arguments: dict) -> str:
+    """Route a tool call to the appropriate handler."""
+    if name == "execute_command":
+        result = execute_command(
+            command=arguments["command"],
+            timeout=arguments.get("timeout"),
+        )
+        return json.dumps(result)
+    return json.dumps({"error": f"Unknown tool: {name}"})
+
+
+def build_system_prompt() -> str:
+    """Build the system prompt with dynamic values."""
+    return SYSTEM_PROMPT.format(
+        service_name=SERVICE_NAME,
+        repo_dir=str(REPO_DIR),
+    )
+
+
+def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
+    """Convert database messages into the format expected by the API."""
+    api_messages = []
+    for msg in db_messages:
+        entry = {"role": msg["role"]}
+        if msg["role"] == "tool":
+            entry["content"] = msg["content"]
+            entry["tool_call_id"] = msg.get("tool_call_id", "")
+        elif msg.get("tool_calls"):
+            entry["content"] = msg["content"] or ""
+            entry["tool_calls"] = msg["tool_calls"]
+        else:
+            entry["content"] = msg["content"]
+        api_messages.append(entry)
+    return api_messages
+
+
+async def stream_response(messages: list[dict]):
+    """
+    Stream a response from the LLM. Yields events as dicts:
+      {"type": "text", "content": "..."}
+      {"type": "tool_call", "id": "...", "name": "...", "arguments": "..."}
+      {"type": "tool_result", "tool_call_id": "...", "result": "..."}
+      {"type": "done", "full_content": "...", "tool_calls": [...]}
+
+    Handles the full tool-use loop: if the model requests tool calls,
+    executes them and continues the conversation until a final text response.
+    """
+    system_prompt = build_system_prompt()
+    conversation = [{"role": "system", "content": system_prompt}] + messages
+
+    while True:
+        full_content = ""
+        tool_calls_acc = {}  # Accumulate streaming tool calls by index
+
+        stream = await client.chat.completions.create(
+            model=XAI_MODEL,
+            messages=conversation,
+            tools=TOOLS,
+            stream=True,
+        )
+
+        async for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if not delta:
+                continue
+
+            # Accumulate text content
+            if delta.content:
+                full_content += delta.content
+                yield {"type": "text", "content": delta.content}
+
+            # Accumulate tool calls
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {
+                            "id": tc.id or "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        }
+                    if tc.id:
+                        tool_calls_acc[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls_acc[idx]["function"]["name"] = tc.function.name
+                        if tc.function.arguments:
+                            tool_calls_acc[idx]["function"]["arguments"] += tc.function.arguments
+
+        # If there were tool calls, execute them and loop
+        if tool_calls_acc:
+            tool_calls_list = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
+
+            # Add the assistant message with tool calls to conversation
+            assistant_msg = {"role": "assistant", "content": full_content or ""}
+            assistant_msg["tool_calls"] = tool_calls_list
+            conversation.append(assistant_msg)
+
+            # Execute each tool call
+            for tc in tool_calls_list:
+                name = tc["function"]["name"]
+                try:
+                    arguments = json.loads(tc["function"]["arguments"])
+                except json.JSONDecodeError:
+                    arguments = {}
+
+                yield {
+                    "type": "tool_call",
+                    "id": tc["id"],
+                    "name": name,
+                    "arguments": json.dumps(arguments),
+                }
+
+                # Execute the tool
+                result = handle_tool_call(name, arguments)
+
+                yield {
+                    "type": "tool_result",
+                    "tool_call_id": tc["id"],
+                    "result": result,
+                }
+
+                # Add tool result to conversation
+                conversation.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result,
+                })
+
+            # Continue the loop to get the next response
+            continue
+
+        # No tool calls — we have the final response
+        yield {
+            "type": "done",
+            "full_content": full_content,
+            "tool_calls": None,
+        }
+        break
