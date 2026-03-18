@@ -14,7 +14,7 @@ from config import (
     XAI_API_KEY,
     XAI_BASE_URL,
     XAI_MODEL,
-    SYSTEM_PROMPT,
+    load_system_prompt,
     COMMAND_TIMEOUT,
     REPO_DIR,
     SERVICE_NAME,
@@ -120,7 +120,7 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
 
 def build_system_prompt() -> str:
     """Build the system prompt with dynamic values."""
-    return SYSTEM_PROMPT.replace(
+    return load_system_prompt().replace(
         "{service_name}", SERVICE_NAME
     ).replace(
         "{repo_dir}", str(REPO_DIR)
