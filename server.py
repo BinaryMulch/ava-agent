@@ -8,7 +8,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pathlib import Path
 
 import database as db
@@ -23,6 +23,13 @@ app = FastAPI(title="Ava Agent")
 class SendMessageRequest(BaseModel):
     message: str
 
+    @field_validator("message")
+    @classmethod
+    def message_must_not_be_empty(cls, v):
+        if not v.strip():
+            raise ValueError("message must not be empty")
+        return v
+
 class RenameRequest(BaseModel):
     title: str
 
@@ -31,6 +38,11 @@ class RenameRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup():
+    from config import XAI_API_KEY
+    if not XAI_API_KEY:
+        import sys
+        print("FATAL: XAI_API_KEY is not set. Export it or add it to .env", file=sys.stderr)
+        sys.exit(1)
     db.init_db()
 
 
@@ -143,14 +155,13 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                         enriched_event["arguments"] = matched_tc["function"]["arguments"]
                     yield f"data: {json.dumps(enriched_event)}\n\n"
 
+                elif event["type"] == "error":
+                    error_msg = event.get("content", "Unknown error")
+                    db.add_message(conv_id, "assistant", error_msg)
+                    yield f"data: {json.dumps(event)}\n\n"
+
                 elif event["type"] == "done":
-                    # Save remaining tool calls if any
-                    if tool_calls_to_save:
-                        db.add_message(
-                            conv_id, "assistant", event.get("full_content", ""),
-                            tool_calls=tool_calls_to_save,
-                        )
-                    elif event.get("full_content"):
+                    if event.get("full_content"):
                         db.add_message(conv_id, "assistant", event["full_content"])
 
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"

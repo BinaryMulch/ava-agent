@@ -3,7 +3,10 @@ Ava Agent - Core Agent Logic
 Handles LLM interaction and tool execution.
 """
 
+import os
 import json
+import uuid
+import signal
 import asyncio
 from openai import AsyncOpenAI
 
@@ -62,6 +65,7 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=timeout
@@ -72,8 +76,14 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
             "exit_code": process.returncode,
         }
     except asyncio.TimeoutError:
-        process.kill()
-        await process.communicate()
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=5)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            pass
         return {
             "stdout": "",
             "stderr": f"Command timed out after {timeout} seconds",
@@ -134,10 +144,11 @@ async def stream_response(messages: list[dict]):
     Handles the full tool-use loop: if the model requests tool calls,
     executes them and continues the conversation until a final text response.
     """
+    MAX_TOOL_ROUNDS = 20
     system_prompt = build_system_prompt()
     conversation = [{"role": "system", "content": system_prompt}] + messages
 
-    while True:
+    for _round in range(MAX_TOOL_ROUNDS):
         full_content = ""
         tool_calls_acc = {}  # Accumulate streaming tool calls by index
 
@@ -148,33 +159,36 @@ async def stream_response(messages: list[dict]):
             stream=True,
         )
 
-        async for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if not delta:
-                continue
+        try:
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if not delta:
+                    continue
 
-            # Accumulate text content
-            if delta.content:
-                full_content += delta.content
-                yield {"type": "text", "content": delta.content}
+                # Accumulate text content
+                if delta.content:
+                    full_content += delta.content
+                    yield {"type": "text", "content": delta.content}
 
-            # Accumulate tool calls
-            if delta.tool_calls:
-                for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tool_calls_acc:
-                        tool_calls_acc[idx] = {
-                            "id": tc.id or "",
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
-                        }
-                    if tc.id:
-                        tool_calls_acc[idx]["id"] = tc.id
-                    if tc.function:
-                        if tc.function.name:
-                            tool_calls_acc[idx]["function"]["name"] = tc.function.name
-                        if tc.function.arguments:
-                            tool_calls_acc[idx]["function"]["arguments"] += tc.function.arguments
+                # Accumulate tool calls
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_acc:
+                            tool_calls_acc[idx] = {
+                                "id": tc.id or f"tc_{uuid.uuid4().hex[:8]}",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        if tc.id:
+                            tool_calls_acc[idx]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_calls_acc[idx]["function"]["name"] = tc.function.name
+                            if tc.function.arguments:
+                                tool_calls_acc[idx]["function"]["arguments"] += tc.function.arguments
+        finally:
+            await stream.close()
 
         # If there were tool calls, execute them and loop
         if tool_calls_acc:
@@ -185,18 +199,18 @@ async def stream_response(messages: list[dict]):
             assistant_msg["tool_calls"] = tool_calls_list
             conversation.append(assistant_msg)
 
-            # Execute each tool call
+            # Parse and emit all tool_call events first so the server
+            # can batch-save one assistant message with all tool calls
+            parsed_calls = []
             for tc in tool_calls_list:
                 name = tc["function"]["name"]
                 try:
                     arguments = json.loads(tc["function"]["arguments"])
                 except json.JSONDecodeError:
-                    arguments = {"_error": f"Malformed arguments: {tc['function']['arguments']}"}
-                    result = json.dumps({"error": "Failed to parse tool arguments", "raw": tc["function"]["arguments"]})
-                    yield {"type": "tool_result", "tool_call_id": tc["id"], "result": result}
-                    conversation.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                    arguments = None
+                    parsed_calls.append((tc, name, arguments))
                     continue
-
+                parsed_calls.append((tc, name, arguments))
                 yield {
                     "type": "tool_call",
                     "id": tc["id"],
@@ -204,7 +218,14 @@ async def stream_response(messages: list[dict]):
                     "arguments": json.dumps(arguments),
                 }
 
-                # Execute the tool
+            # Now execute each tool call and emit results
+            for tc, name, arguments in parsed_calls:
+                if arguments is None:
+                    result = json.dumps({"error": "Failed to parse tool arguments", "raw": tc["function"]["arguments"]})
+                    yield {"type": "tool_result", "tool_call_id": tc["id"], "result": result}
+                    conversation.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                    continue
+
                 result = await handle_tool_call(name, arguments)
 
                 yield {
@@ -213,11 +234,14 @@ async def stream_response(messages: list[dict]):
                     "result": result,
                 }
 
+                # Truncate tool result to 32KB before feeding back to the model
+                truncated = result if len(result) <= 32768 else result[:32768] + "\n... [output truncated]"
+
                 # Add tool result to conversation
                 conversation.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": result,
+                    "content": truncated,
                 })
 
             # Continue the loop to get the next response
@@ -229,4 +253,10 @@ async def stream_response(messages: list[dict]):
             "full_content": full_content,
             "tool_calls": None,
         }
-        break
+        return
+
+    # Exceeded max tool rounds
+    yield {
+        "type": "error",
+        "content": f"Stopped after {MAX_TOOL_ROUNDS} tool call rounds.",
+    }
