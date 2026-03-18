@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from pathlib import Path
 
 import database as db
-from agent import stream_response, format_messages_for_api, handle_tool_call
+from agent import stream_response, format_messages_for_api
 from config import HOST, PORT, REPO_DIR, SERVICE_NAME
 
 app = FastAPI(title="Ava Agent")
@@ -124,10 +124,11 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                     # Save the assistant message with tool calls if we haven't yet
                     if tool_calls_to_save:
                         db.add_message(
-                            conv_id, "assistant", "",
+                            conv_id, "assistant", full_content,
                             tool_calls=tool_calls_to_save,
                         )
                         tool_calls_to_save = []
+                        full_content = ""
 
                     # Save the tool result message
                     db.add_message(
@@ -175,31 +176,30 @@ async def send_message(conv_id: str, body: SendMessageRequest):
 @app.post("/api/update")
 async def update_agent():
     """Pull latest from git and restart the service."""
-    import subprocess
-
     # Git pull
-    result = subprocess.run(
-        ["git", "pull"],
+    process = await asyncio.create_subprocess_exec(
+        "git", "pull",
         cwd=str(REPO_DIR),
-        capture_output=True,
-        text=True,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
+    stdout, stderr = await process.communicate()
 
-    if result.returncode != 0:
+    if process.returncode != 0:
         return JSONResponse(
             status_code=500,
             content={
                 "status": "error",
-                "message": f"Git pull failed: {result.stderr}",
+                "message": f"Git pull failed: {stderr.decode()}",
             },
         )
 
-    git_output = result.stdout.strip()
+    git_output = stdout.decode().strip()
 
     # Schedule restart after response is sent
     async def restart_later():
         await asyncio.sleep(1)
-        subprocess.Popen(["systemctl", "restart", SERVICE_NAME])
+        await asyncio.create_subprocess_exec("systemctl", "restart", SERVICE_NAME)
 
     asyncio.create_task(restart_later())
 

@@ -474,6 +474,16 @@
   // ── State ──────────────────────────────────────────
   let currentConvId = null;
   let isStreaming = false;
+  let activeReader = null;
+
+  function abortStream() {
+    if (activeReader) {
+      activeReader.cancel();
+      activeReader = null;
+    }
+    isStreaming = false;
+    sendBtn.disabled = false;
+  }
 
   // ── DOM refs ───────────────────────────────────────
   const sidebar = document.getElementById('sidebar');
@@ -530,6 +540,7 @@
 
   // ── Open a conversation ────────────────────────────
   async function openConversation(id) {
+    abortStream();
     currentConvId = id;
     sidebar.classList.remove('open');
     overlay.classList.remove('open');
@@ -656,6 +667,7 @@
       });
 
       const reader = response.body.getReader();
+      activeReader = reader;
       const decoder = new TextDecoder();
       let buffer = '';
       let fullContent = '';
@@ -671,7 +683,8 @@
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
-          const data = JSON.parse(line.slice(6));
+          let data;
+          try { data = JSON.parse(line.slice(6)); } catch { continue; }
 
           if (data.type === 'text') {
             if (!removedTyping) {
@@ -732,6 +745,7 @@
 
     isStreaming = false;
     sendBtn.disabled = false;
+    activeReader = null;
     loadConversations();
     scrollToBottom();
     input.focus();
@@ -784,6 +798,7 @@
 
   // ── Event listeners ────────────────────────────────
   newChatBtn.onclick = async () => {
+    abortStream();
     currentConvId = null;
     showWelcome();
     loadConversations();

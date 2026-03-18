@@ -3,7 +3,6 @@ Ava Agent - Core Agent Logic
 Handles LLM interaction and tool execution.
 """
 
-import subprocess
 import json
 import asyncio
 from openai import AsyncOpenAI
@@ -55,22 +54,26 @@ TOOLS = [
 ]
 
 
-def execute_command(command: str, timeout: int | None = None) -> dict:
+async def execute_command(command: str, timeout: int | None = None) -> dict:
     """Execute a shell command and return the result."""
     timeout = timeout or COMMAND_TIMEOUT
     try:
-        result = subprocess.run(
-            ["bash", "-c", command],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout
         )
         return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
+            "stdout": stdout.decode(),
+            "stderr": stderr.decode(),
+            "exit_code": process.returncode,
         }
-    except subprocess.TimeoutExpired:
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
         return {
             "stdout": "",
             "stderr": f"Command timed out after {timeout} seconds",
@@ -84,10 +87,10 @@ def execute_command(command: str, timeout: int | None = None) -> dict:
         }
 
 
-def handle_tool_call(name: str, arguments: dict) -> str:
+async def handle_tool_call(name: str, arguments: dict) -> str:
     """Route a tool call to the appropriate handler."""
     if name == "execute_command":
-        result = execute_command(
+        result = await execute_command(
             command=arguments["command"],
             timeout=arguments.get("timeout"),
         )
@@ -188,7 +191,11 @@ async def stream_response(messages: list[dict]):
                 try:
                     arguments = json.loads(tc["function"]["arguments"])
                 except json.JSONDecodeError:
-                    arguments = {}
+                    arguments = {"_error": f"Malformed arguments: {tc['function']['arguments']}"}
+                    result = json.dumps({"error": "Failed to parse tool arguments", "raw": tc["function"]["arguments"]})
+                    yield {"type": "tool_result", "tool_call_id": tc["id"], "result": result}
+                    conversation.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                    continue
 
                 yield {
                     "type": "tool_call",
@@ -198,7 +205,7 @@ async def stream_response(messages: list[dict]):
                 }
 
                 # Execute the tool
-                result = handle_tool_call(name, arguments)
+                result = await handle_tool_call(name, arguments)
 
                 yield {
                     "type": "tool_result",

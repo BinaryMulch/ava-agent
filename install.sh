@@ -37,7 +37,7 @@ fi
 
 # ── Install Python dependencies ────────────────────────
 info "Installing Python packages..."
-"$INSTALL_DIR/venv/bin/pip" install -q fastapi uvicorn openai
+"$INSTALL_DIR/venv/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
 
 # ── Create .env file if it doesn't exist ───────────────
 if [ ! -f "$INSTALL_DIR/.env" ]; then
