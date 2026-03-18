@@ -738,6 +738,41 @@
           }
         }
       }
+
+      // Drain any remaining data in buffer after stream ends
+      if (buffer.trim()) {
+        const remaining = buffer.split('\n');
+        for (const line of remaining) {
+          if (!line.startsWith('data: ')) continue;
+          let data;
+          try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (data.type === 'text') {
+            if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+            fullContent += data.content;
+            let streamMsg = messagesEl.querySelector('.streaming-msg');
+            if (!streamMsg) { streamMsg = appendMessage('assistant', ''); streamMsg.classList.add('streaming-msg'); }
+            streamMsg.querySelector('.content').innerHTML = renderMarkdown(fullContent);
+            scrollToBottom();
+          }
+          if (data.type === 'tool_result') {
+            if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+            let args = {};
+            try { args = JSON.parse(data.arguments || '{}'); } catch {}
+            appendToolBlock(data.name || 'execute_command', args, data.result || '');
+            scrollToBottom();
+          }
+          if (data.type === 'done') {
+            const existingStream = messagesEl.querySelector('.streaming-msg');
+            if (existingStream) existingStream.classList.remove('streaming-msg');
+            if (!removedTyping) typingEl.remove();
+          }
+          if (data.type === 'error') {
+            if (!removedTyping) typingEl.remove();
+            appendMessage('assistant', data.content || 'An error occurred.');
+          }
+        }
+      }
     } catch (err) {
       typingEl?.remove();
       appendMessage('assistant', `Connection error: ${err.message}`);

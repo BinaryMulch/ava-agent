@@ -107,6 +107,7 @@ async def send_message(conv_id: str, body: SendMessageRequest):
     async def event_stream():
         full_content = ""
         tool_calls_to_save = []
+        tool_calls_by_id = {}
 
         try:
             async for event in stream_response(api_messages):
@@ -115,23 +116,21 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                     yield f"data: {json.dumps(event)}\n\n"
 
                 elif event["type"] == "tool_call":
-                    tool_calls_to_save.append({
+                    tc_entry = {
                         "id": event["id"],
                         "type": "function",
                         "function": {
                             "name": event["name"],
                             "arguments": event["arguments"],
                         },
-                    })
+                    }
+                    tool_calls_to_save.append(tc_entry)
+                    tool_calls_by_id[event["id"]] = tc_entry
                     yield f"data: {json.dumps(event)}\n\n"
 
                 elif event["type"] == "tool_result":
                     # Find the matching tool call to include command info
-                    matched_tc = None
-                    for tc in tool_calls_to_save:
-                        if tc["id"] == event["tool_call_id"]:
-                            matched_tc = tc
-                            break
+                    matched_tc = tool_calls_by_id.get(event["tool_call_id"])
 
                     # Save the assistant message with tool calls if we haven't yet
                     if tool_calls_to_save:
@@ -159,6 +158,7 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                     error_msg = event.get("content", "Unknown error")
                     db.add_message(conv_id, "assistant", error_msg)
                     yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
                 elif event["type"] == "done":
                     if event.get("full_content"):
