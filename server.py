@@ -78,6 +78,7 @@ async def get_conversation(conv_id: str):
 async def delete_conversation(conv_id: str):
     if not await _db(db.delete_conversation, conv_id):
         raise HTTPException(404, "Conversation not found")
+    _conv_locks.pop(conv_id, None)
     return {"status": "deleted"}
 
 

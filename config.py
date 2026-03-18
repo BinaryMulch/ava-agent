@@ -26,12 +26,15 @@ REPO_DIR = BASE_DIR
 SERVICE_NAME = os.getenv("AVA_SERVICE_NAME", "ava-agent")
 
 # System prompt
-SYSTEM_PROMPT_FILE = BASE_DIR / "system_prompt.txt"
+SYSTEM_PROMPT_FILE = BASE_DIR / "system_prompt.md"
 
 
 def load_system_prompt() -> str:
     """Load system prompt from file, re-reading each call for hot reload."""
-    return SYSTEM_PROMPT_FILE.read_text().strip()
+    try:
+        return SYSTEM_PROMPT_FILE.read_text().strip()
+    except (FileNotFoundError, PermissionError) as e:
+        raise RuntimeError(f"Failed to load system prompt from {SYSTEM_PROMPT_FILE}: {e}") from e
 
 # Command execution settings
 COMMAND_TIMEOUT = int(os.getenv("AVA_COMMAND_TIMEOUT", "300"))  # 5 minutes default
