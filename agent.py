@@ -133,6 +133,48 @@ def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
     return api_messages
 
 
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 characters per token."""
+    return len(text) // 4
+
+
+def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict]:
+    """Trim older messages to fit within a token budget, preserving recent context.
+
+    Always keeps at least the last 10 messages. Removes oldest messages first,
+    but never breaks up a tool_calls/tool sequence (keeps assistant+tool groups intact).
+    """
+    if not messages:
+        return messages
+
+    total = sum(_estimate_tokens(json.dumps(m)) for m in messages)
+    if total <= max_tokens:
+        return messages
+
+    # Always keep at least the last 10 messages
+    min_keep = min(10, len(messages))
+    trimmed = list(messages)
+
+    while len(trimmed) > min_keep:
+        total = sum(_estimate_tokens(json.dumps(m)) for m in trimmed)
+        if total <= max_tokens:
+            break
+        # Remove the oldest message, but skip tool messages that would be orphaned
+        msg = trimmed[0]
+        if msg["role"] == "tool":
+            # Remove orphaned tool message
+            trimmed.pop(0)
+        elif msg["role"] == "assistant" and msg.get("tool_calls"):
+            # Remove assistant + its subsequent tool results as a group
+            trimmed.pop(0)
+            while trimmed and trimmed[0]["role"] == "tool":
+                trimmed.pop(0)
+        else:
+            trimmed.pop(0)
+
+    return trimmed
+
+
 async def stream_response(messages: list[dict]):
     """
     Stream a response from the LLM. Yields events as dicts:
@@ -146,7 +188,8 @@ async def stream_response(messages: list[dict]):
     """
     MAX_TOOL_ROUNDS = 20
     system_prompt = build_system_prompt()
-    conversation = [{"role": "system", "content": system_prompt}] + messages
+    trimmed = _trim_messages(messages)
+    conversation = [{"role": "system", "content": system_prompt}] + trimmed
 
     for _round in range(MAX_TOOL_ROUNDS):
         full_content = ""
@@ -208,14 +251,12 @@ async def stream_response(messages: list[dict]):
                     arguments = json.loads(tc["function"]["arguments"])
                 except json.JSONDecodeError:
                     arguments = None
-                    parsed_calls.append((tc, name, arguments))
-                    continue
                 parsed_calls.append((tc, name, arguments))
                 yield {
                     "type": "tool_call",
                     "id": tc["id"],
                     "name": name,
-                    "arguments": json.dumps(arguments),
+                    "arguments": tc["function"]["arguments"],
                 }
 
             # Now execute each tool call and emit results

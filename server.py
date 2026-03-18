@@ -5,6 +5,7 @@ Web API and SSE streaming endpoints.
 
 import json
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +16,20 @@ import database as db
 from agent import stream_response, format_messages_for_api
 from config import HOST, PORT, REPO_DIR, SERVICE_NAME
 
-app = FastAPI(title="Ava Agent")
+
+# ── Lifespan ─────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app):
+    from config import XAI_API_KEY
+    if not XAI_API_KEY:
+        import sys
+        print("FATAL: XAI_API_KEY is not set. Export it or add it to .env", file=sys.stderr)
+        sys.exit(1)
+    db.init_db()
+    yield
+
+app = FastAPI(title="Ava Agent", lifespan=lifespan)
 
 
 # ── Pydantic models ──────────────────────────────────────────────────
@@ -32,18 +46,6 @@ class SendMessageRequest(BaseModel):
 
 class RenameRequest(BaseModel):
     title: str
-
-
-# ── Startup ──────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup():
-    from config import XAI_API_KEY
-    if not XAI_API_KEY:
-        import sys
-        print("FATAL: XAI_API_KEY is not set. Export it or add it to .env", file=sys.stderr)
-        sys.exit(1)
-    db.init_db()
 
 
 # ── Conversation endpoints ───────────────────────────────────────────

@@ -248,6 +248,33 @@
     padding: 0;
   }
 
+  .message .content h1,
+  .message .content h2,
+  .message .content h3,
+  .message .content h4,
+  .message .content h5,
+  .message .content h6 {
+    margin: 12px 0 6px;
+    line-height: 1.3;
+  }
+  .message .content h1 { font-size: 1.4em; }
+  .message .content h2 { font-size: 1.25em; }
+  .message .content h3 { font-size: 1.1em; }
+
+  .message .content ul,
+  .message .content ol {
+    margin: 6px 0;
+    padding-left: 24px;
+  }
+  .message .content li { margin: 2px 0; }
+
+  .message .content blockquote {
+    border-left: 3px solid var(--accent);
+    padding: 4px 12px;
+    margin: 6px 0;
+    color: var(--text-muted);
+  }
+
   .tool-block {
     background: var(--tool-bg);
     border: 1px solid #2a3040;
@@ -673,6 +700,52 @@
       let fullContent = '';
       let removedTyping = false;
 
+      function processSSELine(line) {
+        if (!line.startsWith('data: ')) return;
+        let data;
+        try { data = JSON.parse(line.slice(6)); } catch { return; }
+
+        if (data.type === 'text') {
+          if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+          fullContent += data.content;
+          let streamMsg = messagesEl.querySelector('.streaming-msg');
+          if (!streamMsg) {
+            streamMsg = appendMessage('assistant', '');
+            streamMsg.classList.add('streaming-msg');
+          }
+          streamMsg.querySelector('.content').innerHTML = renderMarkdown(fullContent);
+          scrollToBottom();
+        }
+
+        if (data.type === 'tool_call') {
+          if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+          const existingStream = messagesEl.querySelector('.streaming-msg');
+          if (existingStream) {
+            existingStream.classList.remove('streaming-msg');
+            fullContent = '';
+          }
+        }
+
+        if (data.type === 'tool_result') {
+          if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+          let args = {};
+          try { args = JSON.parse(data.arguments || '{}'); } catch {}
+          appendToolBlock(data.name || 'execute_command', args, data.result || '');
+          scrollToBottom();
+        }
+
+        if (data.type === 'done') {
+          const existingStream = messagesEl.querySelector('.streaming-msg');
+          if (existingStream) existingStream.classList.remove('streaming-msg');
+          if (!removedTyping) typingEl.remove();
+        }
+
+        if (data.type === 'error') {
+          if (!removedTyping) typingEl.remove();
+          appendMessage('assistant', data.content || 'An error occurred.');
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -682,60 +755,7 @@
         buffer = lines.pop() || '';
 
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let data;
-          try { data = JSON.parse(line.slice(6)); } catch { continue; }
-
-          if (data.type === 'text') {
-            if (!removedTyping) {
-              typingEl.remove();
-              removedTyping = true;
-            }
-            fullContent += data.content;
-            // Find or create the streaming message
-            let streamMsg = messagesEl.querySelector('.streaming-msg');
-            if (!streamMsg) {
-              streamMsg = appendMessage('assistant', '');
-              streamMsg.classList.add('streaming-msg');
-            }
-            streamMsg.querySelector('.content').innerHTML = renderMarkdown(fullContent);
-            scrollToBottom();
-          }
-
-          if (data.type === 'tool_call') {
-            if (!removedTyping) {
-              typingEl.remove();
-              removedTyping = true;
-            }
-            // Finalize any streaming text
-            const existingStream = messagesEl.querySelector('.streaming-msg');
-            if (existingStream) {
-              existingStream.classList.remove('streaming-msg');
-              fullContent = '';
-            }
-          }
-
-          if (data.type === 'tool_result') {
-            if (!removedTyping) {
-              typingEl.remove();
-              removedTyping = true;
-            }
-            let args = {};
-            try { args = JSON.parse(data.arguments || '{}'); } catch {}
-            appendToolBlock(data.name || 'execute_command', args, data.result || '');
-            scrollToBottom();
-          }
-
-          if (data.type === 'done') {
-            const existingStream = messagesEl.querySelector('.streaming-msg');
-            if (existingStream) existingStream.classList.remove('streaming-msg');
-            if (!removedTyping) typingEl.remove();
-          }
-
-          if (data.type === 'error') {
-            if (!removedTyping) typingEl.remove();
-            appendMessage('assistant', data.content || 'An error occurred.');
-          }
+          processSSELine(line);
         }
       }
 
@@ -743,34 +763,7 @@
       if (buffer.trim()) {
         const remaining = buffer.split('\n');
         for (const line of remaining) {
-          if (!line.startsWith('data: ')) continue;
-          let data;
-          try { data = JSON.parse(line.slice(6)); } catch { continue; }
-
-          if (data.type === 'text') {
-            if (!removedTyping) { typingEl.remove(); removedTyping = true; }
-            fullContent += data.content;
-            let streamMsg = messagesEl.querySelector('.streaming-msg');
-            if (!streamMsg) { streamMsg = appendMessage('assistant', ''); streamMsg.classList.add('streaming-msg'); }
-            streamMsg.querySelector('.content').innerHTML = renderMarkdown(fullContent);
-            scrollToBottom();
-          }
-          if (data.type === 'tool_result') {
-            if (!removedTyping) { typingEl.remove(); removedTyping = true; }
-            let args = {};
-            try { args = JSON.parse(data.arguments || '{}'); } catch {}
-            appendToolBlock(data.name || 'execute_command', args, data.result || '');
-            scrollToBottom();
-          }
-          if (data.type === 'done') {
-            const existingStream = messagesEl.querySelector('.streaming-msg');
-            if (existingStream) existingStream.classList.remove('streaming-msg');
-            if (!removedTyping) typingEl.remove();
-          }
-          if (data.type === 'error') {
-            if (!removedTyping) typingEl.remove();
-            appendMessage('assistant', data.content || 'An error occurred.');
-          }
+          processSSELine(line);
         }
       }
     } catch (err) {
@@ -824,12 +817,67 @@
       codeBlocks.push(`<code>${code}</code>`);
       return `\x00CODEBLOCK${idx}\x00`;
     });
+    // Bold + italic (***text***)
+    html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
     // Bold
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     // Italic
     html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
+    // Process line-level elements (headers, lists, blockquotes)
+    const lines = html.split('\n');
+    const processed = [];
+    let inList = null; // 'ul' or 'ol'
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Headers
+      const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (headerMatch) {
+        if (inList) { processed.push(`</${inList}>`); inList = null; }
+        const level = headerMatch[1].length;
+        processed.push(`<h${level}>${headerMatch[2]}</h${level}>`);
+        continue;
+      }
+      // Unordered list items
+      const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
+      if (ulMatch) {
+        if (inList !== 'ul') {
+          if (inList) processed.push(`</${inList}>`);
+          processed.push('<ul>');
+          inList = 'ul';
+        }
+        processed.push(`<li>${ulMatch[1]}</li>`);
+        continue;
+      }
+      // Ordered list items
+      const olMatch = line.match(/^\d+\.\s+(.+)$/);
+      if (olMatch) {
+        if (inList !== 'ol') {
+          if (inList) processed.push(`</${inList}>`);
+          processed.push('<ol>');
+          inList = 'ol';
+        }
+        processed.push(`<li>${olMatch[1]}</li>`);
+        continue;
+      }
+      // Blockquotes
+      const bqMatch = line.match(/^&gt;\s?(.*)$/);
+      if (bqMatch) {
+        if (inList) { processed.push(`</${inList}>`); inList = null; }
+        processed.push(`<blockquote>${bqMatch[1]}</blockquote>`);
+        continue;
+      }
+      // Regular line
+      if (inList) { processed.push(`</${inList}>`); inList = null; }
+      processed.push(line);
+    }
+    if (inList) processed.push(`</${inList}>`);
+    // Join with <br>, but don't add <br> after block elements
+    html = processed.reduce((acc, line, i) => {
+      if (i === 0) return line;
+      const blockTags = /^<(h[1-6]|ul|ol|li|\/ul|\/ol|blockquote)/;
+      if (blockTags.test(line) || blockTags.test(processed[i - 1])) return acc + line;
+      return acc + '<br>' + line;
+    }, '');
     // Restore code blocks
     html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, idx) => codeBlocks[parseInt(idx)]);
     return html;
