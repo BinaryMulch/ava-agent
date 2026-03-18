@@ -120,9 +120,10 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
 
 def build_system_prompt() -> str:
     """Build the system prompt with dynamic values."""
-    return SYSTEM_PROMPT.format(
-        service_name=SERVICE_NAME,
-        repo_dir=str(REPO_DIR),
+    return SYSTEM_PROMPT.replace(
+        "{service_name}", SERVICE_NAME
+    ).replace(
+        "{repo_dir}", str(REPO_DIR)
     )
 
 
@@ -190,9 +191,16 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
             total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
     # Ensure conversation starts with a user message (after system prompt is prepended)
-    while (len(trimmed) > 1
-           and trimmed[0]["role"] != "user"):
-        total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+    # Pop assistant+tool groups together to avoid orphaned tool messages
+    while len(trimmed) > 1 and trimmed[0]["role"] != "user":
+        msg = trimmed[0]
+        if msg["role"] == "assistant" and msg.get("tool_calls"):
+            # Remove the assistant message and all following tool messages in its group
+            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+            while trimmed and trimmed[0]["role"] == "tool":
+                total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+        else:
+            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
     return trimmed
 

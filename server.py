@@ -99,9 +99,6 @@ async def _get_conv_lock(conv_id: str):
     lock = _conv_locks[conv_id]
     async with lock:
         yield lock
-    # Cleanup after releasing the lock — lock.locked() is now accurate
-    if not lock.locked() and conv_id in _conv_locks:
-        del _conv_locks[conv_id]
 
 
 @app.post("/api/conversations/{conv_id}/messages")
@@ -204,6 +201,7 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                 error_msg = f"Error: {str(e)}"
                 await _db(db.add_message, conv_id, "assistant", error_msg)
                 yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
         event_stream(),
