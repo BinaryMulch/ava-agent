@@ -132,8 +132,12 @@ def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
     for msg in db_messages:
         entry = {"role": msg["role"]}
         if msg["role"] == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            if not tool_call_id:
+                print(f"WARNING: Skipping tool message with missing tool_call_id: {msg.get('content', '')[:100]}")
+                continue
             entry["content"] = msg["content"]
-            entry["tool_call_id"] = msg.get("tool_call_id", "")
+            entry["tool_call_id"] = tool_call_id
         elif msg.get("tool_calls"):
             entry["content"] = msg["content"] or ""
             entry["tool_calls"] = msg["tool_calls"]

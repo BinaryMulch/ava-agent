@@ -5,6 +5,7 @@ Web API and SSE streaming endpoints.
 
 import json
 import asyncio
+from functools import partial
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -14,6 +15,11 @@ from pathlib import Path
 import database as db
 from agent import stream_response, format_messages_for_api
 from config import HOST, PORT, REPO_DIR, SERVICE_NAME
+
+
+async def _db(func, *args, **kwargs):
+    """Run a synchronous database function in a thread to avoid blocking the event loop."""
+    return await asyncio.to_thread(partial(func, *args, **kwargs))
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────
@@ -51,33 +57,33 @@ class RenameRequest(BaseModel):
 
 @app.get("/api/conversations")
 async def list_conversations():
-    return db.list_conversations()
+    return await _db(db.list_conversations)
 
 
 @app.post("/api/conversations")
 async def create_conversation():
-    return db.create_conversation()
+    return await _db(db.create_conversation)
 
 
 @app.get("/api/conversations/{conv_id}")
 async def get_conversation(conv_id: str):
-    conv = db.get_conversation(conv_id)
+    conv = await _db(db.get_conversation, conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
-    conv["messages"] = db.get_messages(conv_id)
+    conv["messages"] = await _db(db.get_messages, conv_id)
     return conv
 
 
 @app.delete("/api/conversations/{conv_id}")
 async def delete_conversation(conv_id: str):
-    if not db.delete_conversation(conv_id):
+    if not await _db(db.delete_conversation, conv_id):
         raise HTTPException(404, "Conversation not found")
     return {"status": "deleted"}
 
 
 @app.patch("/api/conversations/{conv_id}")
 async def rename_conversation(conv_id: str, body: RenameRequest):
-    if not db.rename_conversation(conv_id, body.title):
+    if not await _db(db.rename_conversation, conv_id, body.title):
         raise HTTPException(404, "Conversation not found")
     return {"status": "updated"}
 
@@ -92,36 +98,34 @@ async def _get_conv_lock(conv_id: str):
         _conv_locks[conv_id] = asyncio.Lock()
     lock = _conv_locks[conv_id]
     async with lock:
-        try:
-            yield lock
-        finally:
-            # Remove the lock if no one else is waiting for it
-            if not lock.locked() and conv_id in _conv_locks:
-                del _conv_locks[conv_id]
+        yield lock
+    # Cleanup after releasing the lock — lock.locked() is now accurate
+    if not lock.locked() and conv_id in _conv_locks:
+        del _conv_locks[conv_id]
 
 
 @app.post("/api/conversations/{conv_id}/messages")
 async def send_message(conv_id: str, body: SendMessageRequest):
     """Send a message and stream the response via SSE."""
     # Validate conversation exists before starting the stream
-    conv = db.get_conversation(conv_id)
+    conv = await _db(db.get_conversation, conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
 
     async def event_stream():
         async with _get_conv_lock(conv_id):
             # Save the user message
-            db.add_message(conv_id, "user", body.message)
+            await _db(db.add_message, conv_id, "user", body.message)
 
             # Auto-title: use the first message as the conversation title
             if conv["title"] == "New Conversation":
                 title = body.message[:80].strip()
                 if len(body.message) > 80:
                     title += "..."
-                db.rename_conversation(conv_id, title)
+                await _db(db.rename_conversation, conv_id, title)
 
             # Build message history for the API
-            history = db.get_messages(conv_id)
+            history = await _db(db.get_messages, conv_id)
             api_messages = format_messages_for_api(history)
 
             full_content = ""
@@ -153,7 +157,8 @@ async def send_message(conv_id: str, body: SendMessageRequest):
 
                         # Save the assistant message with tool calls if we haven't yet
                         if tool_calls_to_save:
-                            db.add_message(
+                            await _db(
+                                db.add_message,
                                 conv_id, "assistant", full_content,
                                 tool_calls=tool_calls_to_save,
                             )
@@ -161,7 +166,8 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                             full_content = ""
 
                         # Save the tool result message
-                        db.add_message(
+                        await _db(
+                            db.add_message,
                             conv_id, "tool", event["result"],
                             tool_call_id=event["tool_call_id"],
                         )
@@ -175,19 +181,28 @@ async def send_message(conv_id: str, body: SendMessageRequest):
 
                     elif event["type"] == "error":
                         error_msg = event.get("content", "Unknown error")
-                        db.add_message(conv_id, "assistant", error_msg)
+                        await _db(db.add_message, conv_id, "assistant", error_msg)
                         yield f"data: {json.dumps(event)}\n\n"
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
                     elif event["type"] == "done":
                         if event.get("full_content"):
-                            db.add_message(conv_id, "assistant", event["full_content"])
+                            await _db(db.add_message, conv_id, "assistant", event["full_content"])
 
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
             except Exception as e:
+                # Save any pending assistant message with tool calls
+                if tool_calls_to_save:
+                    await _db(
+                        db.add_message,
+                        conv_id, "assistant", full_content,
+                        tool_calls=tool_calls_to_save,
+                    )
+                    tool_calls_to_save = []
+                    full_content = ""
                 error_msg = f"Error: {str(e)}"
-                db.add_message(conv_id, "assistant", error_msg)
+                await _db(db.add_message, conv_id, "assistant", error_msg)
                 yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
 
     return StreamingResponse(

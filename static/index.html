@@ -758,7 +758,10 @@
         }
 
         if (data.type === 'error') {
-          if (!removedTyping) typingEl.remove();
+          if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+          const existingStream = messagesEl.querySelector('.streaming-msg');
+          if (existingStream) existingStream.classList.remove('streaming-msg');
+          fullContent = '';
           appendMessage('assistant', data.content || 'An error occurred.');
         }
       }
