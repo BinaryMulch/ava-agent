@@ -88,8 +88,8 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
         except (ProcessLookupError, OSError):
             pass
         try:
-            await asyncio.wait_for(process.communicate(), timeout=5)
-        except (asyncio.TimeoutError, ProcessLookupError):
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except (asyncio.TimeoutError, ProcessLookupError, OSError):
             pass
         return {
             "stdout": "",
@@ -278,14 +278,17 @@ async def stream_response(messages: list[dict]):
             conversation.append(assistant_msg)
 
             # Parse and emit all tool_call events first so the server
-            # can batch-save one assistant message with all tool calls
+            # can batch-save one assistant message with all tool calls.
+            # Skip malformed tool calls (bad JSON args) — return error results directly.
             parsed_calls = []
+            malformed_calls = []
             for tc in tool_calls_list:
                 name = tc["function"]["name"]
                 try:
                     arguments = json.loads(tc["function"]["arguments"])
                 except json.JSONDecodeError:
-                    arguments = None
+                    malformed_calls.append(tc)
+                    continue
                 parsed_calls.append((tc, name, arguments))
                 yield {
                     "type": "tool_call",
@@ -294,14 +297,22 @@ async def stream_response(messages: list[dict]):
                     "arguments": tc["function"]["arguments"],
                 }
 
-            # Now execute each tool call and emit results
-            for tc, name, arguments in parsed_calls:
-                if arguments is None:
-                    result = json.dumps({"error": "Failed to parse tool arguments", "raw": tc["function"]["arguments"]})
-                    yield {"type": "tool_result", "tool_call_id": tc["id"], "result": result}
-                    conversation.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-                    continue
+            # Remove malformed entries from the assistant message in conversation history
+            if malformed_calls:
+                malformed_ids = {tc["id"] for tc in malformed_calls}
+                assistant_msg["tool_calls"] = [
+                    tc for tc in assistant_msg["tool_calls"]
+                    if tc["id"] not in malformed_ids
+                ]
 
+            # Emit error results for malformed tool calls
+            for tc in malformed_calls:
+                result = json.dumps({"error": "Failed to parse tool arguments", "raw": tc["function"]["arguments"]})
+                yield {"type": "tool_result", "tool_call_id": tc["id"], "result": result}
+                conversation.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+
+            # Now execute each valid tool call and emit results
+            for tc, name, arguments in parsed_calls:
                 result = await handle_tool_call(name, arguments)
 
                 yield {

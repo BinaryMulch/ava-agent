@@ -52,6 +52,16 @@ class SendMessageRequest(BaseModel):
 class RenameRequest(BaseModel):
     title: str
 
+    @field_validator("title")
+    @classmethod
+    def title_must_be_valid(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("title must not be empty")
+        if len(v) > 200:
+            raise ValueError("title must not exceed 200 characters")
+        return v
+
 
 # ── Conversation endpoints ───────────────────────────────────────────
 
@@ -95,8 +105,7 @@ _conv_locks: dict[str, asyncio.Lock] = {}
 
 @asynccontextmanager
 async def _get_conv_lock(conv_id: str):
-    if conv_id not in _conv_locks:
-        _conv_locks[conv_id] = asyncio.Lock()
+    _conv_locks.setdefault(conv_id, asyncio.Lock())
     lock = _conv_locks[conv_id]
     async with lock:
         yield lock
@@ -115,8 +124,9 @@ async def send_message(conv_id: str, body: SendMessageRequest):
             # Save the user message
             await _db(db.add_message, conv_id, "user", body.message)
 
-            # Auto-title: use the first message as the conversation title
-            if conv["title"] == "New Conversation":
+            # Auto-title: re-read conversation inside lock to avoid stale snapshot
+            current_conv = await _db(db.get_conversation, conv_id)
+            if current_conv and current_conv["title"] == "New Conversation":
                 title = body.message[:80].strip()
                 if len(body.message) > 80:
                     title += "..."
@@ -188,6 +198,12 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                             await _db(db.add_message, conv_id, "assistant", event["full_content"])
 
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+            except asyncio.CancelledError:
+                # Client disconnected — clean up without saving partial state
+                import logging
+                logging.getLogger(__name__).info(f"Client disconnected from conversation {conv_id}")
+                return
 
             except Exception as e:
                 # Save any pending assistant message with tool calls
@@ -266,7 +282,8 @@ async def health():
 @app.get("/")
 async def index():
     html_path = Path(__file__).parent / "static" / "index.html"
-    return HTMLResponse(html_path.read_text())
+    content = await asyncio.to_thread(html_path.read_text)
+    return HTMLResponse(content)
 
 
 # ── Main entry point ─────────────────────────────────────────────────
