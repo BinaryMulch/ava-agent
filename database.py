@@ -148,6 +148,9 @@ def get_messages(conversation_id: str) -> list[dict]:
     for r in rows:
         msg = dict(r)
         if msg["tool_calls"]:
-            msg["tool_calls"] = json.loads(msg["tool_calls"])
+            try:
+                msg["tool_calls"] = json.loads(msg["tool_calls"])
+            except json.JSONDecodeError:
+                msg["tool_calls"] = None
         messages.append(msg)
     return messages

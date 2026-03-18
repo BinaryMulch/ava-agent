@@ -70,9 +70,16 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=timeout
         )
+        MAX_OUTPUT = 256 * 1024
+        stdout_str = stdout.decode(errors="replace")
+        stderr_str = stderr.decode(errors="replace")
+        if len(stdout_str) > MAX_OUTPUT:
+            stdout_str = stdout_str[:MAX_OUTPUT] + "\n... [output truncated]"
+        if len(stderr_str) > MAX_OUTPUT:
+            stderr_str = stderr_str[:MAX_OUTPUT] + "\n... [output truncated]"
         return {
-            "stdout": stdout.decode(),
-            "stderr": stderr.decode(),
+            "stdout": stdout_str,
+            "stderr": stderr_str,
             "exit_code": process.returncode,
         }
     except asyncio.TimeoutError:
@@ -100,8 +107,11 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
 async def handle_tool_call(name: str, arguments: dict) -> str:
     """Route a tool call to the appropriate handler."""
     if name == "execute_command":
+        command = arguments.get("command")
+        if not command:
+            return json.dumps({"error": "Missing 'command' argument"})
         result = await execute_command(
-            command=arguments["command"],
+            command=command,
             timeout=arguments.get("timeout"),
         )
         return json.dumps(result)
@@ -176,9 +186,9 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
             total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
     # Ensure conversation doesn't start with orphaned tool/assistant+tool_calls messages
-    while (trimmed and trimmed[0]["role"] in ("tool",)
-           or (trimmed and trimmed[0]["role"] == "assistant"
-               and trimmed[0].get("tool_calls"))):
+    while (len(trimmed) > 1
+           and (trimmed[0]["role"] == "tool"
+                or (trimmed[0]["role"] == "assistant" and trimmed[0].get("tool_calls")))):
         total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
     return trimmed

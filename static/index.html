@@ -502,6 +502,7 @@
   let currentConvId = null;
   let isStreaming = false;
   let activeReader = null;
+  let streamGeneration = 0;
 
   function abortStream() {
     if (activeReader) {
@@ -519,7 +520,7 @@
   const newChatBtn = document.getElementById('new-chat-btn');
   const convList = document.getElementById('conversation-list');
   const messagesEl = document.getElementById('messages');
-  const welcomeEl = document.getElementById('welcome');
+  let welcomeEl = document.getElementById('welcome');
   const chatTitle = document.getElementById('chat-title');
   const input = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
@@ -540,7 +541,13 @@
 
   // ── Conversation list ──────────────────────────────
   async function loadConversations() {
-    const convs = await api('GET', '/api/conversations');
+    let convs;
+    try {
+      convs = await api('GET', '/api/conversations');
+    } catch (e) {
+      console.error('Failed to load conversations:', e);
+      return;
+    }
     convList.innerHTML = '';
     convs.forEach(c => {
       const el = document.createElement('div');
@@ -685,6 +692,7 @@
 
     isStreaming = true;
     sendBtn.disabled = true;
+    const myGeneration = ++streamGeneration;
 
     try {
       const response = await fetch(`/api/conversations/${currentConvId}/messages`, {
@@ -776,6 +784,7 @@
         }
       }
     } catch (err) {
+      if (myGeneration !== streamGeneration) return;
       typingEl?.remove();
       appendMessage('assistant', `Connection error: ${err.message}`);
     }
@@ -798,6 +807,7 @@
         <p>Your AI assistant with full system access. Ask me to manage files, install packages, configure services, or anything else.</p>
       </div>
     `;
+    welcomeEl = document.getElementById('welcome');
   }
 
   // ── Helpers ────────────────────────────────────────

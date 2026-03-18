@@ -84,26 +84,35 @@ async def rename_conversation(conv_id: str, body: RenameRequest):
 
 # ── Chat endpoint (SSE streaming) ────────────────────────────────────
 
+_conv_locks: dict[str, asyncio.Lock] = {}
+
+def _get_conv_lock(conv_id: str) -> asyncio.Lock:
+    if conv_id not in _conv_locks:
+        _conv_locks[conv_id] = asyncio.Lock()
+    return _conv_locks[conv_id]
+
+
 @app.post("/api/conversations/{conv_id}/messages")
 async def send_message(conv_id: str, body: SendMessageRequest):
     """Send a message and stream the response via SSE."""
-    conv = db.get_conversation(conv_id)
-    if not conv:
-        raise HTTPException(404, "Conversation not found")
+    async with _get_conv_lock(conv_id):
+        conv = db.get_conversation(conv_id)
+        if not conv:
+            raise HTTPException(404, "Conversation not found")
 
-    # Save the user message
-    db.add_message(conv_id, "user", body.message)
+        # Save the user message
+        db.add_message(conv_id, "user", body.message)
 
-    # Auto-title: use the first message as the conversation title
-    if conv["title"] == "New Conversation":
-        title = body.message[:80].strip()
-        if len(body.message) > 80:
-            title += "..."
-        db.rename_conversation(conv_id, title)
+        # Auto-title: use the first message as the conversation title
+        if conv["title"] == "New Conversation":
+            title = body.message[:80].strip()
+            if len(body.message) > 80:
+                title += "..."
+            db.rename_conversation(conv_id, title)
 
-    # Build message history for the API
-    history = db.get_messages(conv_id)
-    api_messages = format_messages_for_api(history)
+        # Build message history for the API
+        history = db.get_messages(conv_id)
+        api_messages = format_messages_for_api(history)
 
     async def event_stream():
         full_content = ""
