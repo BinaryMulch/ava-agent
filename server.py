@@ -86,100 +86,109 @@ async def rename_conversation(conv_id: str, body: RenameRequest):
 
 _conv_locks: dict[str, asyncio.Lock] = {}
 
-def _get_conv_lock(conv_id: str) -> asyncio.Lock:
+@asynccontextmanager
+async def _get_conv_lock(conv_id: str):
     if conv_id not in _conv_locks:
         _conv_locks[conv_id] = asyncio.Lock()
-    return _conv_locks[conv_id]
+    lock = _conv_locks[conv_id]
+    async with lock:
+        try:
+            yield lock
+        finally:
+            # Remove the lock if no one else is waiting for it
+            if not lock.locked() and conv_id in _conv_locks:
+                del _conv_locks[conv_id]
 
 
 @app.post("/api/conversations/{conv_id}/messages")
 async def send_message(conv_id: str, body: SendMessageRequest):
     """Send a message and stream the response via SSE."""
-    async with _get_conv_lock(conv_id):
-        conv = db.get_conversation(conv_id)
-        if not conv:
-            raise HTTPException(404, "Conversation not found")
-
-        # Save the user message
-        db.add_message(conv_id, "user", body.message)
-
-        # Auto-title: use the first message as the conversation title
-        if conv["title"] == "New Conversation":
-            title = body.message[:80].strip()
-            if len(body.message) > 80:
-                title += "..."
-            db.rename_conversation(conv_id, title)
-
-        # Build message history for the API
-        history = db.get_messages(conv_id)
-        api_messages = format_messages_for_api(history)
+    # Validate conversation exists before starting the stream
+    conv = db.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
 
     async def event_stream():
-        full_content = ""
-        tool_calls_to_save = []
-        tool_calls_by_id = {}
+        async with _get_conv_lock(conv_id):
+            # Save the user message
+            db.add_message(conv_id, "user", body.message)
 
-        try:
-            async for event in stream_response(api_messages):
-                if event["type"] == "text":
-                    full_content += event["content"]
-                    yield f"data: {json.dumps(event)}\n\n"
+            # Auto-title: use the first message as the conversation title
+            if conv["title"] == "New Conversation":
+                title = body.message[:80].strip()
+                if len(body.message) > 80:
+                    title += "..."
+                db.rename_conversation(conv_id, title)
 
-                elif event["type"] == "tool_call":
-                    tc_entry = {
-                        "id": event["id"],
-                        "type": "function",
-                        "function": {
-                            "name": event["name"],
-                            "arguments": event["arguments"],
-                        },
-                    }
-                    tool_calls_to_save.append(tc_entry)
-                    tool_calls_by_id[event["id"]] = tc_entry
-                    yield f"data: {json.dumps(event)}\n\n"
+            # Build message history for the API
+            history = db.get_messages(conv_id)
+            api_messages = format_messages_for_api(history)
 
-                elif event["type"] == "tool_result":
-                    # Find the matching tool call to include command info
-                    matched_tc = tool_calls_by_id.get(event["tool_call_id"])
+            full_content = ""
+            tool_calls_to_save = []
+            tool_calls_by_id = {}
 
-                    # Save the assistant message with tool calls if we haven't yet
-                    if tool_calls_to_save:
+            try:
+                async for event in stream_response(api_messages):
+                    if event["type"] == "text":
+                        full_content += event["content"]
+                        yield f"data: {json.dumps(event)}\n\n"
+
+                    elif event["type"] == "tool_call":
+                        tc_entry = {
+                            "id": event["id"],
+                            "type": "function",
+                            "function": {
+                                "name": event["name"],
+                                "arguments": event["arguments"],
+                            },
+                        }
+                        tool_calls_to_save.append(tc_entry)
+                        tool_calls_by_id[event["id"]] = tc_entry
+                        yield f"data: {json.dumps(event)}\n\n"
+
+                    elif event["type"] == "tool_result":
+                        # Find the matching tool call to include command info
+                        matched_tc = tool_calls_by_id.get(event["tool_call_id"])
+
+                        # Save the assistant message with tool calls if we haven't yet
+                        if tool_calls_to_save:
+                            db.add_message(
+                                conv_id, "assistant", full_content,
+                                tool_calls=tool_calls_to_save,
+                            )
+                            tool_calls_to_save = []
+                            full_content = ""
+
+                        # Save the tool result message
                         db.add_message(
-                            conv_id, "assistant", full_content,
-                            tool_calls=tool_calls_to_save,
+                            conv_id, "tool", event["result"],
+                            tool_call_id=event["tool_call_id"],
                         )
-                        tool_calls_to_save = []
-                        full_content = ""
 
-                    # Save the tool result message
-                    db.add_message(
-                        conv_id, "tool", event["result"],
-                        tool_call_id=event["tool_call_id"],
-                    )
+                        # Include command info in the event for the frontend
+                        enriched_event = dict(event)
+                        if matched_tc:
+                            enriched_event["name"] = matched_tc["function"]["name"]
+                            enriched_event["arguments"] = matched_tc["function"]["arguments"]
+                        yield f"data: {json.dumps(enriched_event)}\n\n"
 
-                    # Include command info in the event for the frontend
-                    enriched_event = dict(event)
-                    if matched_tc:
-                        enriched_event["name"] = matched_tc["function"]["name"]
-                        enriched_event["arguments"] = matched_tc["function"]["arguments"]
-                    yield f"data: {json.dumps(enriched_event)}\n\n"
+                    elif event["type"] == "error":
+                        error_msg = event.get("content", "Unknown error")
+                        db.add_message(conv_id, "assistant", error_msg)
+                        yield f"data: {json.dumps(event)}\n\n"
+                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-                elif event["type"] == "error":
-                    error_msg = event.get("content", "Unknown error")
-                    db.add_message(conv_id, "assistant", error_msg)
-                    yield f"data: {json.dumps(event)}\n\n"
-                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    elif event["type"] == "done":
+                        if event.get("full_content"):
+                            db.add_message(conv_id, "assistant", event["full_content"])
 
-                elif event["type"] == "done":
-                    if event.get("full_content"):
-                        db.add_message(conv_id, "assistant", event["full_content"])
+                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            db.add_message(conv_id, "assistant", error_msg)
-            yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
+            except Exception as e:
+                error_msg = f"Error: {str(e)}"
+                db.add_message(conv_id, "assistant", error_msg)
+                yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
 
     return StreamingResponse(
         event_stream(),

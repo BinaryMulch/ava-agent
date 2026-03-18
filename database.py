@@ -17,6 +17,7 @@ def init_db():
     """Initialize the database and create tables if they don't exist."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_db() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
@@ -49,7 +50,6 @@ def get_db():
     """Context manager for database connections."""
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
@@ -93,7 +93,7 @@ def delete_conversation(conv_id: str) -> bool:
     with get_db() as conn:
         cursor = conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
         conn.commit()
-    return cursor.rowcount > 0
+        return cursor.rowcount > 0
 
 
 def rename_conversation(conv_id: str, title: str) -> bool:
@@ -105,7 +105,7 @@ def rename_conversation(conv_id: str, title: str) -> bool:
             (title, now, conv_id),
         )
         conn.commit()
-    return cursor.rowcount > 0
+        return cursor.rowcount > 0
 
 
 def add_message(conversation_id: str, role: str, content: str,
@@ -151,6 +151,7 @@ def get_messages(conversation_id: str) -> list[dict]:
             try:
                 msg["tool_calls"] = json.loads(msg["tool_calls"])
             except json.JSONDecodeError:
+                print(f"WARNING: Corrupt tool_calls JSON in message {msg.get('id')}, conversation {conversation_id}")
                 msg["tool_calls"] = None
         messages.append(msg)
     return messages

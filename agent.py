@@ -185,10 +185,9 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
         else:
             total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
-    # Ensure conversation doesn't start with orphaned tool/assistant+tool_calls messages
+    # Ensure conversation starts with a user message (after system prompt is prepended)
     while (len(trimmed) > 1
-           and (trimmed[0]["role"] == "tool"
-                or (trimmed[0]["role"] == "assistant" and trimmed[0].get("tool_calls")))):
+           and trimmed[0]["role"] != "user"):
         total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
 
     return trimmed
