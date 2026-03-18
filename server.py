@@ -109,6 +109,9 @@ async def _get_conv_lock(conv_id: str):
     lock = _conv_locks[conv_id]
     async with lock:
         yield lock
+    # Evict if no one else is waiting
+    if not lock.locked():
+        _conv_locks.pop(conv_id, None)
 
 
 @app.post("/api/conversations/{conv_id}/messages")
@@ -200,9 +203,16 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
             except asyncio.CancelledError:
-                # Client disconnected — clean up without saving partial state
+                # Client disconnected — save placeholder so history stays valid
                 import logging
                 logging.getLogger(__name__).info(f"Client disconnected from conversation {conv_id}")
+                if tool_calls_to_save:
+                    await _db(
+                        db.add_message,
+                        conv_id, "assistant", full_content,
+                        tool_calls=tool_calls_to_save,
+                    )
+                await _db(db.add_message, conv_id, "assistant", "[Response interrupted]")
                 return
 
             except Exception as e:

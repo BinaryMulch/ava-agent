@@ -673,11 +673,21 @@
     const text = input.value.trim();
     if (!text || isStreaming) return;
 
+    // Guard against double-submit before any async work
+    isStreaming = true;
+    sendBtn.disabled = true;
+
     // Create conversation if needed
     if (!currentConvId) {
-      const conv = await api('POST', '/api/conversations');
-      currentConvId = conv.id;
-      chatTitle.textContent = conv.title;
+      try {
+        const conv = await api('POST', '/api/conversations');
+        currentConvId = conv.id;
+        chatTitle.textContent = conv.title;
+      } catch (err) {
+        isStreaming = false;
+        sendBtn.disabled = false;
+        throw err;
+      }
     }
 
     // Show user message
@@ -689,9 +699,6 @@
     // Show typing indicator
     const typingEl = appendMessage('assistant', '');
     typingEl.querySelector('.content').innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
-
-    isStreaming = true;
-    sendBtn.disabled = true;
     const myGeneration = ++streamGeneration;
 
     try {
@@ -716,6 +723,7 @@
       let buffer = '';
       let fullContent = '';
       let removedTyping = false;
+      let rafPending = false;
 
       function processSSELine(line) {
         if (!line.startsWith('data: ')) return;
@@ -730,8 +738,15 @@
             streamMsg = appendMessage('assistant', '');
             streamMsg.classList.add('streaming-msg');
           }
-          streamMsg.querySelector('.content').innerHTML = renderMarkdown(fullContent);
-          scrollToBottom();
+          if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(() => {
+              const el = messagesEl.querySelector('.streaming-msg');
+              if (el) el.querySelector('.content').innerHTML = renderMarkdown(fullContent);
+              scrollToBottom();
+              rafPending = false;
+            });
+          }
         }
 
         if (data.type === 'tool_call') {
@@ -831,10 +846,10 @@
     // Store raw content with our own escaping to avoid double-encoding.
     const codeBlocks = [];
     let raw = text;
-    raw = raw.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    raw = raw.replace(/(^|\n)```(\w*)\n([\s\S]*?)\n```/g, (_, pre, lang, code) => {
       const idx = codeBlocks.length;
       codeBlocks.push(`<pre><code>${escapeHtml(code.trim())}</code></pre>`);
-      return `\x00CODEBLOCK${idx}\x00`;
+      return `${pre}\x00CODEBLOCK${idx}\x00`;
     });
     raw = raw.replace(/`([^`]+)`/g, (_, code) => {
       const idx = codeBlocks.length;

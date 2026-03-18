@@ -60,29 +60,18 @@ TOOLS = [
 async def execute_command(command: str, timeout: int | None = None) -> dict:
     """Execute a shell command and return the result."""
     timeout = timeout if timeout is not None else COMMAND_TIMEOUT
+    process = await asyncio.create_subprocess_shell(
+        command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
     try:
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=timeout
         )
-        MAX_OUTPUT = 256 * 1024
-        stdout_str = stdout.decode(errors="replace")
-        stderr_str = stderr.decode(errors="replace")
-        if len(stdout_str) > MAX_OUTPUT:
-            stdout_str = stdout_str[:MAX_OUTPUT] + "\n... [output truncated]"
-        if len(stderr_str) > MAX_OUTPUT:
-            stderr_str = stderr_str[:MAX_OUTPUT] + "\n... [output truncated]"
-        return {
-            "stdout": stdout_str,
-            "stderr": stderr_str,
-            "exit_code": process.returncode,
-        }
-    except asyncio.TimeoutError:
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+        # Kill process group on any interruption (timeout, disconnect, etc.)
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         except (ProcessLookupError, OSError):
@@ -91,17 +80,31 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
             await asyncio.wait_for(process.wait(), timeout=5)
         except (asyncio.TimeoutError, ProcessLookupError, OSError):
             pass
-        return {
-            "stdout": "",
-            "stderr": f"Command timed out after {timeout} seconds",
-            "exit_code": -1,
-        }
-    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            raise
+        if isinstance(e, asyncio.TimeoutError):
+            return {
+                "stdout": "",
+                "stderr": f"Command timed out after {timeout} seconds",
+                "exit_code": -1,
+            }
         return {
             "stdout": "",
             "stderr": str(e),
             "exit_code": -1,
         }
+    MAX_OUTPUT = 256 * 1024
+    stdout_str = stdout.decode(errors="replace")
+    stderr_str = stderr.decode(errors="replace")
+    if len(stdout_str) > MAX_OUTPUT:
+        stdout_str = stdout_str[:MAX_OUTPUT] + "\n... [output truncated]"
+    if len(stderr_str) > MAX_OUTPUT:
+        stderr_str = stderr_str[:MAX_OUTPUT] + "\n... [output truncated]"
+    return {
+        "stdout": stdout_str,
+        "stderr": stderr_str,
+        "exit_code": process.returncode,
+    }
 
 
 async def handle_tool_call(name: str, arguments: dict) -> str:
@@ -282,28 +285,20 @@ async def stream_response(messages: list[dict]):
             # Skip malformed tool calls (bad JSON args) — return error results directly.
             parsed_calls = []
             malformed_calls = []
+            # Emit tool_call events for ALL calls (including malformed) so server saves them
             for tc in tool_calls_list:
                 name = tc["function"]["name"]
-                try:
-                    arguments = json.loads(tc["function"]["arguments"])
-                except json.JSONDecodeError:
-                    malformed_calls.append(tc)
-                    continue
-                parsed_calls.append((tc, name, arguments))
                 yield {
                     "type": "tool_call",
                     "id": tc["id"],
                     "name": name,
                     "arguments": tc["function"]["arguments"],
                 }
-
-            # Remove malformed entries from the assistant message in conversation history
-            if malformed_calls:
-                malformed_ids = {tc["id"] for tc in malformed_calls}
-                assistant_msg["tool_calls"] = [
-                    tc for tc in assistant_msg["tool_calls"]
-                    if tc["id"] not in malformed_ids
-                ]
+                try:
+                    arguments = json.loads(tc["function"]["arguments"])
+                    parsed_calls.append((tc, name, arguments))
+                except json.JSONDecodeError:
+                    malformed_calls.append(tc)
 
             # Emit error results for malformed tool calls
             for tc in malformed_calls:

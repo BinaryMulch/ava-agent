@@ -17,7 +17,10 @@ def init_db():
     """Initialize the database and create tables if they don't exist."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with get_db() as conn:
-        conn.execute("PRAGMA journal_mode=WAL")
+        result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        if result[0] != 'wal':
+            import logging
+            logging.getLogger(__name__).warning(f"WAL mode not enabled: {result[0]}")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
@@ -54,7 +57,10 @@ def get_db():
     try:
         yield conn
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     finally:
         conn.close()
