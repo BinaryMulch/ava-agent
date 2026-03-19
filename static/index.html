@@ -34,6 +34,10 @@ tailwind.config = {
   * { box-sizing: border-box; }
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 
+  /* Remove textarea resize handle and any browser artifacts */
+  textarea { resize: none !important; -webkit-appearance: none; -moz-appearance: none; appearance: none; }
+  textarea::-webkit-resizer { display: none; }
+
   /* Chat text sizing — fixed at 14px */
   .msg-content { font-size: 14px; line-height: 1.65; }
   .msg-content pre { font-size: 13px; }
@@ -279,16 +283,20 @@ tailwind.config = {
   function appendMessage(role, content) {
     welcomeEl?.remove();
     const el = document.createElement('div');
-    el.className = 'w-full mx-auto flex gap-3 animate-fadeIn';
 
-    const avatarClass = role === 'user'
-      ? 'bg-indigo-900/60 text-indigo-300'
-      : 'bg-accent text-white shadow-md shadow-accent/15';
+    if (role === 'user') {
+      el.className = 'w-full mx-auto flex justify-end animate-fadeIn';
+      el.innerHTML = `
+        <div class="msg-content max-w-[80%] md:max-w-[70%] bg-indigo-600/90 text-gray-100 rounded-2xl rounded-br-md px-4 py-2.5">${escapeHtml(content)}</div>
+      `;
+    } else {
+      el.className = 'w-full mx-auto flex gap-3 animate-fadeIn';
+      el.innerHTML = `
+        <div class="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center text-xs font-semibold flex-shrink-0 shadow-md shadow-accent/15">A</div>
+        <div class="msg-content max-w-[85%] md:max-w-[75%] min-w-0 bg-surface-tertiary text-gray-300 rounded-2xl rounded-bl-md px-4 py-2.5">${renderMarkdown(content)}</div>
+      `;
+    }
 
-    el.innerHTML = `
-      <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-semibold flex-shrink-0 ${avatarClass}">${role === 'user' ? 'U' : 'A'}</div>
-      <div class="msg-content flex-1 min-w-0 text-gray-300">${role === 'user' ? escapeHtml(content) : renderMarkdown(content)}</div>
-    `;
     messagesEl.appendChild(el);
     return el;
   }
@@ -319,8 +327,8 @@ tailwind.config = {
 
     el.innerHTML = `
       <div class="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center text-xs font-semibold flex-shrink-0 shadow-md shadow-accent/15">A</div>
-      <div class="flex-1 min-w-0">
-        <div class="bg-tool-bg border border-tool-border rounded-lg overflow-hidden">
+      <div class="max-w-[85%] md:max-w-[75%] min-w-0">
+        <div class="bg-tool-bg border border-tool-border rounded-2xl rounded-bl-md overflow-hidden">
           <div class="tool-header flex items-center gap-2 px-3 py-2 text-xs font-semibold text-accent bg-accent/[0.06] cursor-pointer select-none" onclick="this.querySelector('.tool-arrow').classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
             <span class="tool-arrow text-[10px]">&#9654;</span>
             <span class="font-mono truncate">$ ${escapeHtml(commandStr.substring(0, 80))}${commandStr.length > 80 ? '...' : ''}</span>
