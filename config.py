@@ -22,7 +22,7 @@ LOG_BACKUP_COUNT = int(os.getenv("AVA_LOG_BACKUP_COUNT", "5"))  # Keep 5 rotated
 def setup_logging() -> None:
     """Configure logging with file rotation and console output."""
     root = logging.getLogger()
-    if root.handlers:
+    if any(isinstance(h, logging.handlers.RotatingFileHandler) for h in root.handlers):
         return
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
