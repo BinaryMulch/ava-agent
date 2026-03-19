@@ -12,10 +12,10 @@ BASE_DIR = Path(__file__).parent
 # xAI Grok API settings
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
 XAI_BASE_URL = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1")
-XAI_MODEL = os.getenv("XAI_MODEL", "grok-3-latest")
+XAI_MODEL = os.getenv("XAI_MODEL", "grok-4-1-fast-reasoning")
 
 # Server settings
-HOST = os.getenv("AVA_HOST", "127.0.0.1")
+HOST = os.getenv("AVA_HOST", "0.0.0.0")
 PORT = int(os.getenv("AVA_PORT", "8888"))
 
 # Database
