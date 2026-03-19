@@ -209,8 +209,7 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                 if tool_calls_to_save:
                     await _db(
                         db.add_message,
-                        conv_id, "assistant", full_content,
-                        tool_calls=tool_calls_to_save,
+                        conv_id, "assistant", full_content or "",
                     )
                 await _db(db.add_message, conv_id, "assistant", "[Response interrupted]")
                 return
@@ -220,8 +219,7 @@ async def send_message(conv_id: str, body: SendMessageRequest):
                 if tool_calls_to_save:
                     await _db(
                         db.add_message,
-                        conv_id, "assistant", full_content,
-                        tool_calls=tool_calls_to_save,
+                        conv_id, "assistant", full_content or "",
                     )
                     tool_calls_to_save = []
                     full_content = ""
