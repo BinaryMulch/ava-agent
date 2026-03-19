@@ -62,9 +62,6 @@ tailwind.config = {
   .tool-arrow { transition: transform 0.2s; }
   .tool-arrow.open { transform: rotate(90deg); }
 
-  /* Textarea auto-height */
-  #message-input { field-sizing: content; }
-
   /* Markdown content styles */
   .msg-content h1, .msg-content h2, .msg-content h3,
   .msg-content h4, .msg-content h5, .msg-content h6 {
@@ -216,8 +213,8 @@ tailwind.config = {
   textLarger.onclick = () => { if (textStepIdx < TEXT_STEPS.length - 1) { textStepIdx++; applyTextScale(); } };
 
   // ── Sidebar toggle (mobile) ────────────────────────
-  menuToggle.onclick = () => { sidebar.classList.add('open'); overlay.classList.add('open'); };
-  overlay.onclick = () => { sidebar.classList.remove('open'); overlay.classList.remove('open'); };
+  menuToggle.onclick = () => { sidebar.classList.add('open'); overlay.classList.remove('hidden'); };
+  overlay.onclick = () => { sidebar.classList.remove('open'); overlay.classList.add('hidden'); };
 
   // ── API helpers ────────────────────────────────────
   async function api(method, path, body) {
@@ -267,7 +264,7 @@ tailwind.config = {
     abortStream();
     currentConvId = id;
     sidebar.classList.remove('open');
-    overlay.classList.remove('open');
+    overlay.classList.add('hidden');
     const conv = await api('GET', `/api/conversations/${id}`);
     chatTitle.textContent = conv.title;
     renderMessages(conv.messages);
@@ -616,7 +613,7 @@ tailwind.config = {
     showWelcome();
     loadConversations();
     sidebar.classList.remove('open');
-    overlay.classList.remove('open');
+    overlay.classList.add('hidden');
     input.focus();
   };
 
