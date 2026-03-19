@@ -244,7 +244,13 @@ async def send_message(conv_id: str, body: SendMessageRequest):
 @app.post("/api/update")
 async def update_agent():
     """Pull latest from git and restart the service."""
-    # Git pull
+    # Discard local changes and pull latest
+    await asyncio.create_subprocess_exec(
+        "git", "checkout", "--", ".",
+        cwd=str(REPO_DIR),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
     process = await asyncio.create_subprocess_exec(
         "git", "pull",
         cwd=str(REPO_DIR),
