@@ -397,6 +397,61 @@ async def health():
     return {"status": "ok", "service": "ava-agent"}
 
 
+# ── System status endpoint ───────────────────────────────────────────
+
+@app.get("/api/status")
+async def system_status():
+    """Return basic system info for the sidebar status panel."""
+    import shutil
+    import platform
+
+    async def run_cmd(cmd):
+        proc = await asyncio.create_subprocess_shell(
+            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode().strip()
+
+    hostname = platform.node()
+    uptime = await run_cmd("uptime -p 2>/dev/null || uptime")
+    uptime = uptime.replace("up ", "")  # Clean up "up X days, Y hours"
+
+    # Memory
+    try:
+        mem_info = await run_cmd("free -b | awk '/^Mem:/ {printf \"%d %d\", $3, $2}'")
+        mem_used, mem_total = [int(x) for x in mem_info.split()]
+        mem_pct = round(mem_used / mem_total * 100) if mem_total else 0
+        mem_str = f"{mem_used // (1024**3)}/{mem_total // (1024**3)}GB ({mem_pct}%)"
+    except Exception:
+        mem_str = "N/A"
+        mem_pct = 0
+
+    # Disk
+    try:
+        disk = shutil.disk_usage("/")
+        disk_pct = round(disk.used / disk.total * 100)
+        disk_str = f"{disk.used // (1024**3)}/{disk.total // (1024**3)}GB ({disk_pct}%)"
+    except Exception:
+        disk_str = "N/A"
+        disk_pct = 0
+
+    # Load average
+    try:
+        load = await run_cmd("cat /proc/loadavg | awk '{print $1}'")
+    except Exception:
+        load = "N/A"
+
+    return {
+        "hostname": hostname,
+        "uptime": uptime,
+        "memory": mem_str,
+        "memory_pct": mem_pct,
+        "disk": disk_str,
+        "disk_pct": disk_pct,
+        "load": load,
+    }
+
+
 # ── Serve the frontend ───────────────────────────────────────────────
 
 @app.get("/")

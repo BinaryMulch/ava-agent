@@ -104,6 +104,8 @@ tailwind.config = {
     font-family: 'JetBrains Mono', monospace;
   }
   .msg-content pre code { background: none; padding: 0; }
+  .msg-content a { color: #a29bfe; text-decoration: underline; text-underline-offset: 2px; }
+  .msg-content a:hover { color: #c4b5fd; }
 
   /* Image preview in input area */
   #image-preview { scrollbar-width: none; }
@@ -136,11 +138,23 @@ tailwind.config = {
   <!-- Conversation list -->
   <div id="conversation-list" class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5"></div>
 
-  <!-- Footer -->
-  <div class="px-3 py-3 border-t border-border">
-    <button id="update-btn" title="Pull updates from GitHub and restart" class="w-full py-2.5 px-3 bg-surface-tertiary hover:bg-surface-hover text-gray-500 hover:text-gray-300 border border-border rounded-lg text-sm font-medium transition-all duration-150">
-      Update Agent
-    </button>
+  <!-- System status + Footer -->
+  <div class="border-t border-border">
+    <div id="system-status" class="px-4 py-3 text-[11px] text-gray-600 space-y-1.5 hidden">
+      <div class="flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0"></span>
+        <span id="status-hostname" class="text-gray-400 font-medium truncate"></span>
+      </div>
+      <div class="flex justify-between"><span>Uptime</span><span id="status-uptime" class="text-gray-400"></span></div>
+      <div class="flex justify-between"><span>Memory</span><span id="status-memory" class="text-gray-400"></span></div>
+      <div class="flex justify-between"><span>Disk</span><span id="status-disk" class="text-gray-400"></span></div>
+      <div class="flex justify-between"><span>Load</span><span id="status-load" class="text-gray-400"></span></div>
+    </div>
+    <div class="px-3 py-3">
+      <button id="update-btn" title="Pull updates from GitHub and restart" class="w-full py-2.5 px-3 bg-surface-tertiary hover:bg-surface-hover text-gray-500 hover:text-gray-300 border border-border rounded-lg text-sm font-medium transition-all duration-150">
+        Update Agent
+      </button>
+    </div>
   </div>
 </aside>
 
@@ -187,9 +201,12 @@ tailwind.config = {
       ></textarea>
       <button id="send-btn" title="Send"
         class="w-11 h-11 bg-accent hover:bg-accent-dim text-white rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-accent/20">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg id="send-icon" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 2L11 13"></path>
           <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+        </svg>
+        <svg id="stop-icon" class="w-5 h-5 hidden" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="6" width="12" height="12" rx="2"></rect>
         </svg>
       </button>
     </div>
@@ -211,7 +228,6 @@ tailwind.config = {
       activeReader = null;
     }
     isStreaming = false;
-    sendBtn.disabled = false;
   }
 
   // ── DOM refs ───────────────────────────────────────
@@ -225,10 +241,30 @@ tailwind.config = {
   const chatTitle = document.getElementById('chat-title');
   const input = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
+  const sendIcon = document.getElementById('send-icon');
+  const stopIcon = document.getElementById('stop-icon');
   const updateBtn = document.getElementById('update-btn');
   const imageBtn = document.getElementById('image-btn');
   const imageInput = document.getElementById('image-input');
   const imagePreview = document.getElementById('image-preview');
+
+  function showSendMode() {
+    sendIcon.classList.remove('hidden');
+    stopIcon.classList.add('hidden');
+    sendBtn.title = 'Send';
+    sendBtn.classList.remove('bg-red-600', 'hover:bg-red-500');
+    sendBtn.classList.add('bg-accent', 'hover:bg-accent-dim');
+    sendBtn.disabled = false;
+  }
+
+  function showStopMode() {
+    sendIcon.classList.add('hidden');
+    stopIcon.classList.remove('hidden');
+    sendBtn.title = 'Stop generating';
+    sendBtn.classList.remove('bg-accent', 'hover:bg-accent-dim');
+    sendBtn.classList.add('bg-red-600', 'hover:bg-red-500');
+    sendBtn.disabled = false;
+  }
 
   // ── Image handling ─────────────────────────────────
   imageBtn.onclick = () => imageInput.click();
@@ -320,7 +356,9 @@ tailwind.config = {
 
   // ── Open a conversation ────────────────────────────
   async function openConversation(id) {
+    streamGeneration++;
     abortStream();
+    showSendMode();
     currentConvId = id;
     sidebar.classList.remove('open');
     overlay.classList.add('hidden');
@@ -448,7 +486,7 @@ tailwind.config = {
     if (!text || isStreaming) return;
 
     isStreaming = true;
-    sendBtn.disabled = true;
+    showStopMode();
 
     if (!currentConvId) {
       try {
@@ -457,7 +495,7 @@ tailwind.config = {
         chatTitle.textContent = conv.title;
       } catch (err) {
         isStreaming = false;
-        sendBtn.disabled = false;
+        showSendMode();
         throw err;
       }
     }
@@ -491,7 +529,7 @@ tailwind.config = {
         typingEl.remove();
         appendMessage('assistant', `Request failed (${response.status}). Please try again.`);
         isStreaming = false;
-        sendBtn.disabled = false;
+        showSendMode();
         loadConversations();
         return;
       }
@@ -603,7 +641,7 @@ tailwind.config = {
     }
 
     isStreaming = false;
-    sendBtn.disabled = false;
+    showSendMode();
     activeReader = null;
     loadConversations();
     scrollToBottom();
@@ -651,6 +689,12 @@ tailwind.config = {
     raw = raw.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
       const idx = codeBlocks.length;
       codeBlocks.push(`<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" class="max-w-full rounded-lg my-2" loading="lazy" onerror="this.style.display='none'">`);
+      return `\x00CODEBLOCK${idx}\x00`;
+    });
+    // Extract markdown links before escaping: [text](url) — but not images (already extracted)
+    raw = raw.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`);
       return `\x00CODEBLOCK${idx}\x00`;
     });
     let html = escapeHtml(raw);
@@ -724,7 +768,9 @@ tailwind.config = {
 
   // ── Event listeners ────────────────────────────────
   newChatBtn.onclick = async () => {
+    streamGeneration++;
     abortStream();
+    showSendMode();
     currentConvId = null;
     showWelcome();
     loadConversations();
@@ -733,7 +779,23 @@ tailwind.config = {
     input.focus();
   };
 
-  sendBtn.onclick = sendMessage;
+  sendBtn.onclick = () => {
+    if (isStreaming) {
+      streamGeneration++;  // Prevent catch block from showing spurious error
+      abortStream();
+      showSendMode();
+      // Clean up any in-flight UI elements
+      messagesEl.querySelectorAll('.streaming-msg').forEach(el => el.classList.remove('streaming-msg'));
+      messagesEl.querySelectorAll('.tool-executing').forEach(el => el.remove());
+      // Remove typing indicator if still showing (typingEl is local to sendMessage, so query for it)
+      messagesEl.querySelectorAll('.typing-indicator').forEach(el => {
+        const msgEl = el.closest('.w-full');
+        if (msgEl) msgEl.remove();
+      });
+    } else {
+      sendMessage();
+    }
+  };
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -764,8 +826,25 @@ tailwind.config = {
   handleMobile(mql);
   mql.addEventListener('change', handleMobile);
 
+  // ── System status ───────────────────────────────────
+  async function loadSystemStatus() {
+    try {
+      const s = await api('GET', '/api/status');
+      document.getElementById('status-hostname').textContent = s.hostname;
+      document.getElementById('status-uptime').textContent = s.uptime;
+      document.getElementById('status-memory').textContent = s.memory;
+      document.getElementById('status-disk').textContent = s.disk;
+      document.getElementById('status-load').textContent = s.load;
+      document.getElementById('system-status').classList.remove('hidden');
+    } catch (e) {
+      console.error('Failed to load system status:', e);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────
   loadConversations();
+  loadSystemStatus();
+  setInterval(loadSystemStatus, 30000); // Refresh every 30s
 })();
 </script>
 </body>

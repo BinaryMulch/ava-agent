@@ -189,9 +189,32 @@ def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
     return api_messages
 
 
-def _estimate_tokens(text: str) -> int:
-    """Rough token estimate: ~4 characters per token."""
-    return len(text) // 4
+IMAGE_TOKEN_ESTIMATE = 2000  # xAI Grok tokenizes each image at ~2,000 tokens regardless of size
+
+def _estimate_tokens(msg: dict | str) -> int:
+    """Rough token estimate for a message or string.
+
+    For multimodal messages (content is a list of parts), text parts are estimated
+    at ~4 chars/token and image parts at a fixed cost, avoiding wildly inflated
+    estimates from base64 data URIs.
+    """
+    if isinstance(msg, str):
+        return len(msg) // 4
+    content = msg.get("content", "") if isinstance(msg, dict) else msg
+    if isinstance(content, list):
+        total = 0
+        for part in content:
+            if isinstance(part, dict):
+                if part.get("type") == "image_url":
+                    total += IMAGE_TOKEN_ESTIMATE
+                elif part.get("type") == "text":
+                    total += len(part.get("text", "")) // 4
+                else:
+                    total += len(json.dumps(part)) // 4
+            else:
+                total += len(str(part)) // 4
+        return total
+    return len(json.dumps(msg)) // 4
 
 
 def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict]:
@@ -204,7 +227,7 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
     if not messages:
         return messages
 
-    total = sum(_estimate_tokens(json.dumps(m)) for m in messages)
+    total = sum(_estimate_tokens(m) for m in messages)
     if total <= max_tokens:
         return messages
 
@@ -215,7 +238,7 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
     while len(trimmed) > min_keep and total > max_tokens:
         msg = trimmed[0]
         if msg["role"] == "tool":
-            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+            total -= _estimate_tokens(trimmed.pop(0))
         elif msg["role"] == "assistant" and msg.get("tool_calls"):
             # Calculate group size before removing
             group_size = 1
@@ -225,11 +248,11 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
             # Only remove if we'd stay at or above min_keep
             if len(trimmed) - group_size >= min_keep:
                 for _ in range(group_size):
-                    total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+                    total -= _estimate_tokens(trimmed.pop(0))
             else:
                 break
         else:
-            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+            total -= _estimate_tokens(trimmed.pop(0))
 
     # Ensure conversation starts with a user message (after system prompt is prepended)
     # Pop assistant+tool groups together to avoid orphaned tool messages
@@ -237,11 +260,11 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
         msg = trimmed[0]
         if msg["role"] == "assistant" and msg.get("tool_calls"):
             # Remove the assistant message and all following tool messages in its group
-            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+            total -= _estimate_tokens(trimmed.pop(0))
             while trimmed and trimmed[0]["role"] == "tool":
-                total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+                total -= _estimate_tokens(trimmed.pop(0))
         else:
-            total -= _estimate_tokens(json.dumps(trimmed.pop(0)))
+            total -= _estimate_tokens(trimmed.pop(0))
 
     return trimmed
 
