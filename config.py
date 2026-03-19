@@ -4,10 +4,54 @@ All settings are loaded from environment variables or .env file.
 """
 
 import os
+import logging
+import logging.handlers
 from pathlib import Path
 
 # Base directory
 BASE_DIR = Path(__file__).parent
+
+# Logging
+LOG_DIR = BASE_DIR / "data" / "logs"
+LOG_FILE = LOG_DIR / "ava-agent.log"
+LOG_LEVEL = os.getenv("AVA_LOG_LEVEL", "INFO").upper()
+LOG_MAX_BYTES = int(os.getenv("AVA_LOG_MAX_BYTES", str(5 * 1024 * 1024)))  # 5 MB default
+LOG_BACKUP_COUNT = int(os.getenv("AVA_LOG_BACKUP_COUNT", "5"))  # Keep 5 rotated files
+
+
+def setup_logging() -> None:
+    """Configure logging with file rotation and console output."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+
+    # Formatter
+    fmt = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Rotating file handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        str(LOG_FILE),
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(fmt)
+    root.addHandler(file_handler)
+
+    # Console handler (for journalctl / dev)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(fmt)
+    root.addHandler(console_handler)
+
+    # Quiet down noisy libraries
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # xAI Grok API settings
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")

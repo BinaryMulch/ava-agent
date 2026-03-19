@@ -6,8 +6,11 @@ Handles conversation storage and retrieval.
 import sqlite3
 import json
 import uuid
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 from contextlib import contextmanager
 
 from config import DB_PATH
@@ -19,8 +22,7 @@ def init_db():
     with get_db() as conn:
         result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
         if result[0] != 'wal':
-            import logging
-            logging.getLogger(__name__).warning(f"WAL mode not enabled: {result[0]}")
+            log.warning("WAL mode not enabled: %s", result[0])
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
@@ -169,7 +171,7 @@ def get_messages(conversation_id: str) -> list[dict]:
             try:
                 msg["tool_calls"] = json.loads(msg["tool_calls"])
             except json.JSONDecodeError:
-                print(f"WARNING: Corrupt tool_calls JSON in message {msg.get('id')}, conversation {conversation_id}")
+                log.warning("Corrupt tool_calls JSON in message %s, conversation %s", msg.get("id"), conversation_id)
                 msg["tool_calls"] = None
         if msg.get("images"):
             try:

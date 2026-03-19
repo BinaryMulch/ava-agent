@@ -14,9 +14,12 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Fil
 from pydantic import BaseModel, field_validator
 from pathlib import Path
 
+import logging
 import database as db
 from agent import stream_response, format_messages_for_api
-from config import HOST, PORT, REPO_DIR, SERVICE_NAME, UPLOADS_DIR
+from config import HOST, PORT, REPO_DIR, SERVICE_NAME, UPLOADS_DIR, setup_logging
+
+log = logging.getLogger(__name__)
 
 
 async def _db(func, *args, **kwargs):
@@ -28,15 +31,18 @@ async def _db(func, *args, **kwargs):
 
 @asynccontextmanager
 async def lifespan(app):
+    setup_logging()
     from config import XAI_API_KEY
     if not XAI_API_KEY:
+        log.fatal("XAI_API_KEY is not set. Export it or add it to .env")
         import sys
-        print("FATAL: XAI_API_KEY is not set. Export it or add it to .env", file=sys.stderr)
         sys.exit(1)
     db.init_db()
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "data" / "ava_files").mkdir(parents=True, exist_ok=True)
+    log.info("Ava Agent started on %s:%s", HOST, PORT)
     yield
+    log.info("Ava Agent shutting down")
 
 app = FastAPI(title="Ava Agent", lifespan=lifespan)
 
@@ -269,8 +275,7 @@ async def send_message(
 
             except asyncio.CancelledError:
                 # Client disconnected — save placeholder so history stays valid
-                import logging
-                logging.getLogger(__name__).info(f"Client disconnected from conversation {conv_id}")
+                log.info("Client disconnected from conversation %s", conv_id)
                 if tool_calls_to_save:
                     await _db(
                         db.add_message,
@@ -280,6 +285,7 @@ async def send_message(
                 return
 
             except Exception as e:
+                log.exception("Error in conversation %s", conv_id)
                 # Save any pending assistant message with tool calls
                 if tool_calls_to_save:
                     await _db(
@@ -357,6 +363,7 @@ async def update_agent():
     stdout, stderr = await process.communicate()
 
     if process.returncode != 0:
+        log.error("Git pull failed: %s", stderr.decode())
         return JSONResponse(
             status_code=500,
             content={
@@ -366,10 +373,12 @@ async def update_agent():
         )
 
     git_output = stdout.decode().strip()
+    log.info("Git pull succeeded: %s", git_output)
 
     # Schedule restart after response is sent
     async def restart_later():
         await asyncio.sleep(1)
+        log.info("Restarting service %s", SERVICE_NAME)
         await asyncio.create_subprocess_exec("systemctl", "restart", SERVICE_NAME)
 
     asyncio.create_task(restart_later())

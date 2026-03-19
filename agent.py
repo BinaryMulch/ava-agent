@@ -8,8 +8,11 @@ import json
 import uuid
 import base64
 import signal
+import logging
 import asyncio
 from openai import AsyncOpenAI
+
+log = logging.getLogger(__name__)
 
 from config import (
     XAI_API_KEY,
@@ -63,6 +66,7 @@ TOOLS = [
 async def execute_command(command: str, timeout: int | None = None) -> dict:
     """Execute a shell command and return the result."""
     timeout = timeout if timeout is not None else COMMAND_TIMEOUT
+    log.info("Executing command: %s", command[:200])
     process = await asyncio.create_subprocess_shell(
         command,
         stdout=asyncio.subprocess.PIPE,
@@ -86,11 +90,13 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
         if isinstance(e, asyncio.CancelledError):
             raise
         if isinstance(e, asyncio.TimeoutError):
+            log.warning("Command timed out after %ds: %s", timeout, command[:200])
             return {
                 "stdout": "",
                 "stderr": f"Command timed out after {timeout} seconds",
                 "exit_code": -1,
             }
+        log.error("Command failed with error: %s", e)
         return {
             "stdout": "",
             "stderr": str(e),
@@ -103,6 +109,9 @@ async def execute_command(command: str, timeout: int | None = None) -> dict:
         stdout_str = stdout_str[:MAX_OUTPUT] + "\n... [output truncated]"
     if len(stderr_str) > MAX_OUTPUT:
         stderr_str = stderr_str[:MAX_OUTPUT] + "\n... [output truncated]"
+    log.info("Command exited with code %d", process.returncode)
+    if process.returncode != 0 and stderr_str:
+        log.debug("Command stderr: %s", stderr_str[:500])
     return {
         "stdout": stdout_str,
         "stderr": stderr_str,
@@ -149,7 +158,7 @@ def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
         if msg["role"] == "tool":
             tool_call_id = msg.get("tool_call_id")
             if not tool_call_id:
-                print(f"WARNING: Skipping tool message with missing tool_call_id: {msg.get('content', '')[:100]}")
+                log.warning("Skipping tool message with missing tool_call_id: %s", msg.get("content", "")[:100])
                 continue
             entry["content"] = msg["content"]
             entry["tool_call_id"] = tool_call_id
