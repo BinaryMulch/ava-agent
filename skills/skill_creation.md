@@ -3,7 +3,7 @@ When asked to create a new skill, add a capability, or teach yourself something 
 
 What skills are:
 - Skills are markdown files in {repo_dir}/skills/ that extend your knowledge and capabilities
-- Each skill is a .md file that gets automatically loaded into your system prompt on every message
+- Each skill is a .md file that gets automatically loaded into your instructions on every message
 - Skills are hot-reloaded — no restart needed after creating or editing one
 - Skills teach you workflows, conventions, and domain-specific knowledge
 
@@ -29,7 +29,7 @@ Guidelines for writing good skills:
 - Include safety rules (e.g., "always back up before editing", "confirm before deleting")
 - Use the same tone as existing skills for consistency
 - Avoid duplicating instructions that are already in other skills
-- Keep skills concise — the system prompt has a token budget, and every skill adds to it
+- Keep skills concise — there is a token budget, and every skill adds to it
 
 Editing existing skills:
 - List all skills: ls {repo_dir}/skills/

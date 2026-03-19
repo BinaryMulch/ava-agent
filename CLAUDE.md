@@ -31,8 +31,8 @@ For production (systemd): `sudo bash install.sh` then `sudo systemctl start ava-
 - `server.py` — FastAPI app. REST endpoints for conversations CRUD, SSE streaming for chat (`/api/conversations/{id}/messages`), git-pull update endpoint, serves `static/index.html` at `/`.
 - `agent.py` — LLM interaction. Uses `openai.AsyncOpenAI` pointed at xAI. Defines a single tool (`execute_command`) for running bash commands. `stream_response()` is an async generator that handles the full tool-use loop: stream LLM output → execute tool calls → feed results back → repeat until final text response.
 - `database.py` — SQLite layer via raw `sqlite3`. Two tables: `conversations` and `messages`. Messages store tool calls as JSON. Uses WAL mode and context-managed connections.
-- `config.py` — All settings from env vars / `.env`. Loads the system prompt from `system_prompt.md` via `load_system_prompt()`, which re-reads on each call for hot reload.
-- `system_prompt.md` — The system prompt template sent to the LLM. Uses `{service_name}` and `{repo_dir}` placeholders that are replaced at runtime.
+- `config.py` — All settings from env vars / `.env`. Loads the identity from `identity.md` via `load_identity()`, which re-reads on each call for hot reload.
+- `identity.md` — The core identity and instructions for the LLM. Uses `{service_name}` and `{repo_dir}` placeholders that are replaced at runtime.
 
 **Data flow for a chat message:**
 1. `POST /api/conversations/{id}/messages` receives user message

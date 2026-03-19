@@ -19,7 +19,7 @@ from config import (
     XAI_BASE_URL,
     XAI_MODEL,
     UPLOADS_DIR,
-    load_system_prompt,
+    load_identity,
     load_skills,
     COMMAND_TIMEOUT,
     REPO_DIR,
@@ -133,13 +133,13 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
     return json.dumps({"error": f"Unknown tool: {name}"})
 
 
-def build_system_prompt() -> str:
-    """Build the system prompt with dynamic values and appended skills."""
-    prompt = load_system_prompt()
+def build_instructions() -> str:
+    """Build the full instructions from identity + skills with dynamic values."""
+    identity = load_identity()
     skills = load_skills()
     if skills:
-        prompt = prompt + "\n\n" + skills
-    return prompt.replace(
+        identity = identity + "\n\n" + skills
+    return identity.replace(
         "{service_name}", SERVICE_NAME
     ).replace(
         "{repo_dir}", str(REPO_DIR)
@@ -222,7 +222,7 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
 
     Always keeps at least the last 10 messages. Removes oldest messages first,
     but never breaks up a tool_calls/tool sequence (keeps assistant+tool groups intact).
-    Ensures the result starts with a 'user' message (after system prompt is prepended).
+    Ensures the result starts with a 'user' message (after identity is prepended).
     """
     if not messages:
         return messages
@@ -254,7 +254,7 @@ def _trim_messages(messages: list[dict], max_tokens: int = 100_000) -> list[dict
         else:
             total -= _estimate_tokens(trimmed.pop(0))
 
-    # Ensure conversation starts with a user message (after system prompt is prepended)
+    # Ensure conversation starts with a user message (after identity is prepended)
     # Pop assistant+tool groups together to avoid orphaned tool messages
     while len(trimmed) > 1 and trimmed[0]["role"] != "user":
         msg = trimmed[0]
@@ -281,9 +281,9 @@ async def stream_response(messages: list[dict]):
     executes them and continues the conversation until a final text response.
     """
     MAX_TOOL_ROUNDS = 20
-    system_prompt = build_system_prompt()
+    instructions = build_instructions()
     trimmed = _trim_messages(messages)
-    conversation = [{"role": "system", "content": system_prompt}] + trimmed
+    conversation = [{"role": "system", "content": instructions}] + trimmed
 
     for _round in range(MAX_TOOL_ROUNDS):
         full_content = ""
@@ -302,9 +302,18 @@ async def stream_response(messages: list[dict]):
             stream=True,
         )
 
+        finish_reason = None
         try:
             async for chunk in stream:
-                delta = chunk.choices[0].delta if chunk.choices else None
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+
+                # Capture finish_reason from the final chunk
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+                delta = choice.delta
                 if not delta:
                     continue
 
@@ -332,6 +341,11 @@ async def stream_response(messages: list[dict]):
                                 tool_calls_acc[idx]["function"]["arguments"] += tc.function.arguments
         finally:
             await stream.close()
+
+        log.info("Stream round %d finished: finish_reason=%s, content_len=%d, tool_calls=%d",
+                 _round, finish_reason, len(full_content), len(tool_calls_acc))
+        if finish_reason == "length":
+            log.warning("Response truncated by model (finish_reason=length). Consider increasing max_tokens.")
 
         # If there were tool calls, execute them and loop
         if tool_calls_acc:

@@ -41,7 +41,7 @@ ava-agent/
 ├── agent.py             # LLM interaction & tool execution
 ├── database.py          # SQLite conversation storage
 ├── config.py            # Configuration from environment
-├── system_prompt.md     # Core system prompt (hot-reloaded)
+├── identity.md          # Core identity and instructions (hot-reloaded)
 ├── skills/              # Skill files (hot-reloaded)
 │   └── image_display.md # Image display instructions
 ├── static/
@@ -73,7 +73,7 @@ All settings are in `.env`:
 
 ## Skills
 
-Skills are `.md` files in the `skills/` directory that extend Ava's knowledge and capabilities. They're automatically loaded and appended to the system prompt on every message, so changes take effect immediately without a restart.
+Skills are `.md` files in the `skills/` directory that extend Ava's knowledge and capabilities. They're automatically loaded and appended to her instructions on every message, so changes take effect immediately without a restart.
 
 To add a new skill, create a file like `skills/my_skill.md` with instructions for Ava. You can use `{repo_dir}` and `{service_name}` placeholders — they're replaced at runtime.
 

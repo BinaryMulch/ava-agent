@@ -74,19 +74,19 @@ UPLOADS_DIR = BASE_DIR / "data" / "uploads"
 REPO_DIR = BASE_DIR
 SERVICE_NAME = os.getenv("AVA_SERVICE_NAME", "ava-agent")
 
-# System prompt
-SYSTEM_PROMPT_FILE = BASE_DIR / "system_prompt.md"
+# Identity (core instructions for the LLM)
+IDENTITY_FILE = BASE_DIR / "identity.md"
 
 # Skills directory
 SKILLS_DIR = BASE_DIR / "skills"
 
 
-def load_system_prompt() -> str:
-    """Load system prompt from file, re-reading each call for hot reload."""
+def load_identity() -> str:
+    """Load identity file, re-reading each call for hot reload."""
     try:
-        return SYSTEM_PROMPT_FILE.read_text().strip()
+        return IDENTITY_FILE.read_text().strip()
     except (FileNotFoundError, PermissionError) as e:
-        raise RuntimeError(f"Failed to load system prompt from {SYSTEM_PROMPT_FILE}: {e}") from e
+        raise RuntimeError(f"Failed to load identity from {IDENTITY_FILE}: {e}") from e
 
 
 def load_skills() -> str:
