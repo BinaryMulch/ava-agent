@@ -4,19 +4,18 @@ Web API and SSE streaming endpoints.
 """
 
 import json
-import base64
+import uuid
 import asyncio
 from functools import partial
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
 from pydantic import BaseModel, field_validator
 from pathlib import Path
-from typing import Optional
 
 import database as db
 from agent import stream_response, format_messages_for_api
-from config import HOST, PORT, REPO_DIR, SERVICE_NAME
+from config import HOST, PORT, REPO_DIR, SERVICE_NAME, UPLOADS_DIR
 
 
 async def _db(func, *args, **kwargs):
@@ -34,22 +33,13 @@ async def lifespan(app):
         print("FATAL: XAI_API_KEY is not set. Export it or add it to .env", file=sys.stderr)
         sys.exit(1)
     db.init_db()
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     yield
 
 app = FastAPI(title="Ava Agent", lifespan=lifespan)
 
 
 # ── Pydantic models ──────────────────────────────────────────────────
-
-class SendMessageRequest(BaseModel):
-    message: str
-
-    @field_validator("message")
-    @classmethod
-    def message_must_not_be_empty(cls, v):
-        if not v.strip():
-            raise ValueError("message must not be empty")
-        return v
 
 class RenameRequest(BaseModel):
     title: str
@@ -88,9 +78,25 @@ async def get_conversation(conv_id: str):
 
 @app.delete("/api/conversations/{conv_id}")
 async def delete_conversation(conv_id: str):
+    # Collect image filenames before deleting conversation data
+    messages = await _db(db.get_messages, conv_id)
+    image_files = []
+    for msg in messages:
+        for img in (msg.get("images") or []):
+            if img.get("filename"):
+                image_files.append(img["filename"])
+
     if not await _db(db.delete_conversation, conv_id):
         raise HTTPException(404, "Conversation not found")
     _conv_locks.pop(conv_id, None)
+
+    # Clean up uploaded image files
+    for filename in image_files:
+        try:
+            (UPLOADS_DIR / filename).unlink()
+        except FileNotFoundError:
+            pass
+
     return {"status": "deleted"}
 
 
@@ -118,6 +124,14 @@ async def _get_conv_lock(conv_id: str):
 
 ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_IMAGES = 4
+
+EXTENSION_MAP = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
 
 @app.post("/api/conversations/{conv_id}/messages")
 async def send_message(
@@ -129,11 +143,13 @@ async def send_message(
     # Validate
     if not message.strip():
         raise HTTPException(422, "message must not be empty")
+    if len(images) > MAX_IMAGES:
+        raise HTTPException(422, f"Too many images (max {MAX_IMAGES})")
     conv = await _db(db.get_conversation, conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
 
-    # Process uploaded images into base64
+    # Save images to disk, store only metadata
     image_data = []
     for img in images:
         if img.content_type not in ALLOWED_IMAGE_TYPES:
@@ -141,14 +157,18 @@ async def send_message(
         raw = await img.read()
         if len(raw) > MAX_IMAGE_SIZE:
             raise HTTPException(422, f"Image too large (max {MAX_IMAGE_SIZE // 1024 // 1024}MB)")
+        ext = EXTENSION_MAP.get(img.content_type, ".bin")
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = UPLOADS_DIR / filename
+        await asyncio.to_thread(filepath.write_bytes, raw)
         image_data.append({
+            "filename": filename,
             "media_type": img.content_type,
-            "data": base64.b64encode(raw).decode("ascii"),
         })
 
     async def event_stream():
         async with _get_conv_lock(conv_id):
-            # Save the user message (with images if any)
+            # Save the user message (with image metadata if any)
             await _db(
                 db.add_message, conv_id, "user", message,
                 images=image_data if image_data else None,
@@ -264,6 +284,20 @@ async def send_message(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ── Uploads endpoint ─────────────────────────────────────────────────
+
+@app.get("/api/uploads/{filename}")
+async def serve_upload(filename: str):
+    """Serve an uploaded image from disk."""
+    # Sanitize: only allow simple filenames (no path traversal)
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "Invalid filename")
+    filepath = UPLOADS_DIR / filename
+    if not filepath.is_file():
+        raise HTTPException(404, "File not found")
+    return FileResponse(filepath)
 
 
 # ── Update endpoint ──────────────────────────────────────────────────

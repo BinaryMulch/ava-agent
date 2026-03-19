@@ -21,6 +21,9 @@ PORT = int(os.getenv("AVA_PORT", "8888"))
 # Database
 DB_PATH = BASE_DIR / "data" / "conversations.db"
 
+# Uploads
+UPLOADS_DIR = BASE_DIR / "data" / "uploads"
+
 # Git update settings
 REPO_DIR = BASE_DIR
 SERVICE_NAME = os.getenv("AVA_SERVICE_NAME", "ava-agent")

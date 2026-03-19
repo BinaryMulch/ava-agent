@@ -6,6 +6,7 @@ Handles LLM interaction and tool execution.
 import os
 import json
 import uuid
+import base64
 import signal
 import asyncio
 from openai import AsyncOpenAI
@@ -14,6 +15,7 @@ from config import (
     XAI_API_KEY,
     XAI_BASE_URL,
     XAI_MODEL,
+    UPLOADS_DIR,
     load_system_prompt,
     COMMAND_TIMEOUT,
     REPO_DIR,
@@ -155,13 +157,18 @@ def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
             if msg["content"]:
                 parts.append({"type": "text", "text": msg["content"]})
             for img in msg["images"]:
+                filepath = UPLOADS_DIR / img["filename"]
+                try:
+                    data = base64.b64encode(filepath.read_bytes()).decode("ascii")
+                except FileNotFoundError:
+                    continue
                 parts.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:{img['media_type']};base64,{img['data']}",
+                        "url": f"data:{img['media_type']};base64,{data}",
                     },
                 })
-            entry["content"] = parts
+            entry["content"] = parts if parts else msg["content"] or ""
         else:
             entry["content"] = msg["content"]
         api_messages.append(entry)

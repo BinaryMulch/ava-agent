@@ -350,8 +350,17 @@ tailwind.config = {
     let imageHtml = '';
     if (images && images.length > 0) {
       const imgs = images.map(img => {
-        const src = img.data ? `data:${img.media_type};base64,${img.data}` : img.src;
-        return `<img src="${src}" class="max-w-48 max-h-48 rounded-lg object-cover" alt="uploaded image">`;
+        let src;
+        if (img.blobUrl) {
+          // Local preview — will be revoked after load
+          src = img.blobUrl;
+        } else if (img.filename) {
+          // Served from disk
+          src = `/api/uploads/${img.filename}`;
+        } else {
+          return '';
+        }
+        return `<img src="${escapeHtml(src)}" class="max-w-48 max-h-48 rounded-lg object-cover" alt="uploaded image">`;
       }).join('');
       imageHtml = `<div class="flex flex-wrap gap-2 ${content ? 'mb-2' : ''}">${imgs}</div>`;
     }
@@ -370,6 +379,10 @@ tailwind.config = {
     }
 
     messagesEl.appendChild(el);
+    // Revoke blob URLs after images load to prevent memory leaks
+    el.querySelectorAll('img[src^="blob:"]').forEach(img => {
+      img.onload = () => URL.revokeObjectURL(img.src);
+    });
     return el;
   }
 
@@ -432,9 +445,9 @@ tailwind.config = {
       }
     }
 
-    // Capture pending images as object URLs for the user bubble
+    // Capture pending images as blob URLs for the user bubble (revoked after load)
     const imagesToSend = [...pendingImages];
-    const imagePreviewData = imagesToSend.map(f => ({ src: URL.createObjectURL(f), media_type: f.type }));
+    const imagePreviewData = imagesToSend.map(f => ({ blobUrl: URL.createObjectURL(f), media_type: f.type }));
     appendMessage('user', text, imagePreviewData.length > 0 ? imagePreviewData : null);
     input.value = '';
     clearPendingImages();
