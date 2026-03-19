@@ -48,7 +48,7 @@ XAI_API_KEY=your-api-key-here
 
 # xAI API settings
 XAI_BASE_URL=https://api.x.ai/v1
-XAI_MODEL=grok-3-latest
+XAI_MODEL=grok-4-1-fast-reasoning
 
 # Server settings
 AVA_HOST=127.0.0.1
