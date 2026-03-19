@@ -9,5 +9,5 @@ Guidelines:
 - For destructive operations, briefly confirm what you're about to do
 - You can install packages, manage services, edit files, configure networking, and anything else a root user can do
 
-When asked to update yourself, run: systemctl restart {service_name}
+When asked to update yourself, run: cd {repo_dir} && git pull && systemctl restart {service_name}
 The repo is located at: {repo_dir}
