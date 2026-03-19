@@ -421,7 +421,9 @@ async def system_status():
         mem_info = await run_cmd("free -b | awk '/^Mem:/ {printf \"%d %d\", $3, $2}'")
         mem_used, mem_total = [int(x) for x in mem_info.split()]
         mem_pct = round(mem_used / mem_total * 100) if mem_total else 0
-        mem_str = f"{mem_used // (1024**3)}/{mem_total // (1024**3)}GB ({mem_pct}%)"
+        mem_used_gb = mem_used / (1024**3)
+        mem_total_gb = mem_total / (1024**3)
+        mem_str = f"{mem_used_gb:.1f}/{mem_total_gb:.1f}GB ({mem_pct}%)"
     except Exception:
         mem_str = "N/A"
         mem_pct = 0
@@ -430,7 +432,9 @@ async def system_status():
     try:
         disk = shutil.disk_usage("/")
         disk_pct = round(disk.used / disk.total * 100)
-        disk_str = f"{disk.used // (1024**3)}/{disk.total // (1024**3)}GB ({disk_pct}%)"
+        disk_used_gb = disk.used / (1024**3)
+        disk_total_gb = disk.total / (1024**3)
+        disk_str = f"{disk_used_gb:.1f}/{disk_total_gb:.1f}GB ({disk_pct}%)"
     except Exception:
         disk_str = "N/A"
         disk_pct = 0
