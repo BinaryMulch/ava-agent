@@ -20,7 +20,6 @@ tailwind.config = {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
         mono: ['JetBrains Mono', 'SF Mono', 'Fira Code', 'monospace'],
       },
-      maxWidth: { chat: '760px' },
       animation: { fadeIn: 'fadeIn 0.2s ease' },
       keyframes: { fadeIn: { from: { opacity: 0, transform: 'translateY(4px)' }, to: { opacity: 1, transform: 'translateY(0)' } } },
     }
@@ -35,11 +34,10 @@ tailwind.config = {
   * { box-sizing: border-box; }
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 
-  /* Text size steps */
-  :root { --text-scale: 1; }
-  .msg-content { font-size: calc(0.875rem * var(--text-scale)); line-height: 1.65; }
-  .msg-content pre { font-size: calc(0.8125rem * var(--text-scale)); }
-  .msg-content code { font-size: calc(0.8125rem * var(--text-scale)); }
+  /* Chat text sizing — fixed at 14px */
+  .msg-content { font-size: 14px; line-height: 1.65; }
+  .msg-content pre { font-size: 13px; }
+  .msg-content code { font-size: 13px; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 5px; }
@@ -115,7 +113,7 @@ tailwind.config = {
 
   <!-- Footer -->
   <div class="px-3 py-3 border-t border-border">
-    <button id="update-btn" title="Pull updates from GitHub and restart" class="w-full py-2 px-3 bg-surface-tertiary hover:bg-surface-hover text-gray-500 hover:text-gray-300 border border-border rounded-lg text-xs font-medium transition-all duration-150">
+    <button id="update-btn" title="Pull updates from GitHub and restart" class="w-full py-2.5 px-3 bg-surface-tertiary hover:bg-surface-hover text-gray-500 hover:text-gray-300 border border-border rounded-lg text-sm font-medium transition-all duration-150">
       Update Agent
     </button>
   </div>
@@ -130,13 +128,6 @@ tailwind.config = {
   <header id="chat-header" class="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface-secondary/80 backdrop-blur-sm">
     <button id="menu-toggle" class="hidden md:hidden bg-transparent border-none text-gray-300 hover:text-white text-xl cursor-pointer p-1">&#9776;</button>
     <div id="chat-title" class="flex-1 text-sm font-medium text-gray-300 truncate">Ava Agent</div>
-
-    <!-- Text size control -->
-    <div class="flex items-center gap-1 bg-surface-tertiary rounded-lg border border-border px-1 py-0.5">
-      <button id="text-smaller" title="Decrease text size" class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-gray-200 hover:bg-surface-hover transition-colors text-xs font-bold">A-</button>
-      <div class="w-px h-4 bg-border"></div>
-      <button id="text-larger" title="Increase text size" class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-gray-200 hover:bg-surface-hover transition-colors text-sm font-bold">A+</button>
-    </div>
   </header>
 
   <!-- Messages -->
@@ -150,11 +141,11 @@ tailwind.config = {
 
   <!-- Input area -->
   <div id="input-area" class="px-4 py-4 border-t border-border bg-surface">
-    <div id="input-wrapper" class="max-w-chat mx-auto flex gap-3 items-end">
+    <div id="input-wrapper" class="mx-auto flex gap-3 items-end">
       <textarea id="message-input" rows="1"
         placeholder="Message Ava..."
         autofocus
-        class="flex-1 bg-surface-secondary border border-border rounded-xl px-4 py-3 text-gray-200 text-sm font-sans resize-none max-h-52 leading-relaxed outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all placeholder:text-gray-600"
+        class="flex-1 bg-surface-secondary border border-border rounded-xl px-4 py-3 text-gray-200 text-[14px] font-sans resize-none max-h-52 leading-relaxed outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all placeholder:text-gray-600"
       ></textarea>
       <button id="send-btn" title="Send"
         class="w-11 h-11 bg-accent hover:bg-accent-dim text-white rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-accent/20">
@@ -174,15 +165,6 @@ tailwind.config = {
   let isStreaming = false;
   let activeReader = null;
   let streamGeneration = 0;
-
-  // Text scale: 5 steps from 0.85 to 1.25
-  const TEXT_STEPS = [0.8, 0.9, 1.0, 1.1, 1.25];
-  let textStepIdx = parseInt(localStorage.getItem('ava-text-step') || '2');
-  function applyTextScale() {
-    document.documentElement.style.setProperty('--text-scale', TEXT_STEPS[textStepIdx]);
-    localStorage.setItem('ava-text-step', textStepIdx);
-  }
-  applyTextScale();
 
   function abortStream() {
     if (activeReader) {
@@ -205,12 +187,6 @@ tailwind.config = {
   const input = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
   const updateBtn = document.getElementById('update-btn');
-  const textSmaller = document.getElementById('text-smaller');
-  const textLarger = document.getElementById('text-larger');
-
-  // ── Text size controls ─────────────────────────────
-  textSmaller.onclick = () => { if (textStepIdx > 0) { textStepIdx--; applyTextScale(); } };
-  textLarger.onclick = () => { if (textStepIdx < TEXT_STEPS.length - 1) { textStepIdx++; applyTextScale(); } };
 
   // ── Sidebar toggle (mobile) ────────────────────────
   menuToggle.onclick = () => { sidebar.classList.add('open'); overlay.classList.remove('hidden'); };
@@ -238,7 +214,7 @@ tailwind.config = {
     convs.forEach(c => {
       const el = document.createElement('div');
       const isActive = c.id === currentConvId;
-      el.className = `group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] transition-colors duration-100 ${isActive ? 'bg-surface-tertiary text-gray-200' : 'text-gray-500 hover:bg-surface-hover hover:text-gray-300'}`;
+      el.className = `group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-[14px] transition-colors duration-100 ${isActive ? 'bg-surface-tertiary text-gray-200' : 'text-gray-500 hover:bg-surface-hover hover:text-gray-300'}`;
       el.innerHTML = `
         <span class="conv-title flex-1 truncate">${escapeHtml(c.title)}</span>
         <button class="conv-delete hidden group-hover:flex items-center justify-center w-5 h-5 rounded text-red-500/70 hover:text-red-400 hover:bg-red-500/10 text-sm leading-none transition-colors">&times;</button>
@@ -303,7 +279,7 @@ tailwind.config = {
   function appendMessage(role, content) {
     welcomeEl?.remove();
     const el = document.createElement('div');
-    el.className = `max-w-chat w-full mx-auto flex gap-3 animate-fadeIn ${role === 'user' ? '' : ''}`;
+    el.className = 'w-full mx-auto flex gap-3 animate-fadeIn';
 
     const avatarClass = role === 'user'
       ? 'bg-indigo-900/60 text-indigo-300'
@@ -320,7 +296,7 @@ tailwind.config = {
   function appendToolBlock(name, args, result) {
     welcomeEl?.remove();
     const el = document.createElement('div');
-    el.className = 'max-w-chat w-full mx-auto flex gap-3 animate-fadeIn';
+    el.className = 'w-full mx-auto flex gap-3 animate-fadeIn';
     let commandStr = '';
     if (name === 'execute_command' && args.command) {
       commandStr = args.command;
