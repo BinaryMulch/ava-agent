@@ -215,7 +215,39 @@ async def send_message(
             tool_calls_by_id = {}
 
             try:
-                async for event in stream_response(api_messages):
+                # Wrap the agent stream with a heartbeat to keep the
+                # connection alive during long tool executions. SSE
+                # comment lines (": keepalive") are ignored by clients.
+                #
+                # IMPORTANT: We use asyncio.wait() instead of wait_for()
+                # because wait_for cancels the coroutine on timeout, which
+                # corrupts async generator state and causes truncated responses.
+                # asyncio.wait() lets the pending __anext__() keep running
+                # while we send heartbeats alongside it.
+                HEARTBEAT_INTERVAL = 15  # seconds
+                agent_stream = stream_response(api_messages).__aiter__()
+                pending_next = None
+                while True:
+                    if pending_next is None:
+                        pending_next = asyncio.ensure_future(agent_stream.__anext__())
+
+                    done_set, _ = await asyncio.wait(
+                        {pending_next},
+                        timeout=HEARTBEAT_INTERVAL,
+                    )
+
+                    if not done_set:
+                        # Timeout — send heartbeat, don't cancel the pending task
+                        yield ": keepalive\n\n"
+                        continue
+
+                    # Task completed — get the result
+                    pending_next = None
+                    try:
+                        event = done_set.pop().result()
+                    except StopAsyncIteration:
+                        break
+
                     if event["type"] == "text":
                         full_content += event["content"]
                         yield f"data: {json.dumps(event)}\n\n"
