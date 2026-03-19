@@ -58,6 +58,23 @@ tailwind.config = {
     30% { transform: translateY(-5px); }
   }
 
+  /* Tool executing indicator */
+  .tool-executing {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: #9ca3af;
+    padding: 0.5rem 0.75rem;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 0.5rem;
+    margin: 0.5rem 0;
+    animation: pulse-opacity 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse-opacity {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
   /* Tool block expand */
   .tool-body { display: none; }
   .tool-body.open { display: block; }
@@ -452,10 +469,9 @@ tailwind.config = {
     input.value = '';
     clearPendingImages();
     autoResize();
-    scrollToBottom();
-
     const typingEl = appendMessage('assistant', '');
     typingEl.querySelector('.msg-content').innerHTML = '<div class="flex gap-1.5 py-1"><span class="typing-dot w-1.5 h-1.5 bg-gray-500 rounded-full"></span><span class="typing-dot w-1.5 h-1.5 bg-gray-500 rounded-full"></span><span class="typing-dot w-1.5 h-1.5 bg-gray-500 rounded-full"></span></div>';
+    scrollToBottom();
     const myGeneration = ++streamGeneration;
 
     try {
@@ -519,10 +535,23 @@ tailwind.config = {
             existingStream.classList.remove('streaming-msg');
             fullContent = '';
           }
+          // Show executing indicator
+          let cmdStr = '';
+          try {
+            const args = JSON.parse(data.arguments || '{}');
+            cmdStr = args.command || data.name || 'execute_command';
+          } catch { cmdStr = data.name || 'execute_command'; }
+          const execEl = document.createElement('div');
+          execEl.className = 'tool-executing';
+          execEl.textContent = '$ ' + cmdStr;
+          messagesEl.appendChild(execEl);
+          scrollToBottom();
         }
 
         if (data.type === 'tool_result') {
           if (!removedTyping) { typingEl.remove(); removedTyping = true; }
+          const execIndicator = messagesEl.querySelector('.tool-executing');
+          if (execIndicator) execIndicator.remove();
           let args = {};
           try { args = JSON.parse(data.arguments || '{}'); } catch {}
           appendToolBlock(data.name || 'execute_command', args, data.result || '');
@@ -533,6 +562,8 @@ tailwind.config = {
           const existingStream = messagesEl.querySelector('.streaming-msg');
           if (existingStream) existingStream.classList.remove('streaming-msg');
           if (!removedTyping) typingEl.remove();
+          const leftoverExec = messagesEl.querySelector('.tool-executing');
+          if (leftoverExec) leftoverExec.remove();
         }
 
         if (data.type === 'error') {
