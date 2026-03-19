@@ -31,6 +31,9 @@ SERVICE_NAME = os.getenv("AVA_SERVICE_NAME", "ava-agent")
 # System prompt
 SYSTEM_PROMPT_FILE = BASE_DIR / "system_prompt.md"
 
+# Skills directory
+SKILLS_DIR = BASE_DIR / "skills"
+
 
 def load_system_prompt() -> str:
     """Load system prompt from file, re-reading each call for hot reload."""
@@ -38,6 +41,25 @@ def load_system_prompt() -> str:
         return SYSTEM_PROMPT_FILE.read_text().strip()
     except (FileNotFoundError, PermissionError) as e:
         raise RuntimeError(f"Failed to load system prompt from {SYSTEM_PROMPT_FILE}: {e}") from e
+
+
+def load_skills() -> str:
+    """Load all skill files from the skills directory, re-reading each call for hot reload.
+
+    Each .md file in the skills/ directory is treated as a skill.
+    Returns a combined string with all skills, or empty string if none found.
+    """
+    if not SKILLS_DIR.is_dir():
+        return ""
+    skills = []
+    for skill_file in sorted(SKILLS_DIR.glob("*.md")):
+        try:
+            content = skill_file.read_text().strip()
+            if content:
+                skills.append(content)
+        except (PermissionError, OSError):
+            continue
+    return "\n\n".join(skills)
 
 # Command execution settings
 COMMAND_TIMEOUT = int(os.getenv("AVA_COMMAND_TIMEOUT", "300"))  # 5 minutes default

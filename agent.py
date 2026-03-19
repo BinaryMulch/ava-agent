@@ -17,6 +17,7 @@ from config import (
     XAI_MODEL,
     UPLOADS_DIR,
     load_system_prompt,
+    load_skills,
     COMMAND_TIMEOUT,
     REPO_DIR,
     SERVICE_NAME,
@@ -124,8 +125,12 @@ async def handle_tool_call(name: str, arguments: dict) -> str:
 
 
 def build_system_prompt() -> str:
-    """Build the system prompt with dynamic values."""
-    return load_system_prompt().replace(
+    """Build the system prompt with dynamic values and appended skills."""
+    prompt = load_system_prompt()
+    skills = load_skills()
+    if skills:
+        prompt = prompt + "\n\n" + skills
+    return prompt.replace(
         "{service_name}", SERVICE_NAME
     ).replace(
         "{repo_dir}", str(REPO_DIR)
