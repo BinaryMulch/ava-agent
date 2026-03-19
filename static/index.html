@@ -647,6 +647,12 @@ tailwind.config = {
       codeBlocks.push(`<code>${escapeHtml(code)}</code>`);
       return `\x00CODEBLOCK${idx}\x00`;
     });
+    // Extract markdown images before escaping: ![alt](url)
+    raw = raw.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(`<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" class="max-w-full rounded-lg my-2" loading="lazy">`);
+      return `\x00CODEBLOCK${idx}\x00`;
+    });
     let html = escapeHtml(raw);
     html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');

@@ -4,6 +4,7 @@ Web API and SSE streaming endpoints.
 """
 
 import json
+import re
 import uuid
 import asyncio
 from functools import partial
@@ -34,6 +35,7 @@ async def lifespan(app):
         sys.exit(1)
     db.init_db()
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    (REPO_DIR / "data" / "ava_files").mkdir(parents=True, exist_ok=True)
     yield
 
 app = FastAPI(title="Ava Agent", lifespan=lifespan)
@@ -86,6 +88,13 @@ async def delete_conversation(conv_id: str):
             if img.get("filename"):
                 image_files.append(img["filename"])
 
+    # Scan message content for /api/files/ references (ava_files)
+    ava_files_dir = REPO_DIR / "data" / "ava_files"
+    ava_filenames = set()
+    for msg in messages:
+        content = msg.get("content") or ""
+        ava_filenames.update(re.findall(r'/api/files/([A-Za-z0-9._-]+)', content))
+
     if not await _db(db.delete_conversation, conv_id):
         raise HTTPException(404, "Conversation not found")
     _conv_locks.pop(conv_id, None)
@@ -94,6 +103,15 @@ async def delete_conversation(conv_id: str):
     for filename in image_files:
         try:
             (UPLOADS_DIR / filename).unlink()
+        except FileNotFoundError:
+            pass
+
+    # Clean up ava_files referenced in messages
+    for filename in ava_filenames:
+        if "/" in filename or "\\" in filename or ".." in filename:
+            continue
+        try:
+            (ava_files_dir / filename).unlink()
         except FileNotFoundError:
             pass
 
@@ -297,6 +315,24 @@ async def serve_upload(filename: str):
     filepath = UPLOADS_DIR / filename
     if not filepath.is_file():
         raise HTTPException(404, "File not found")
+    return FileResponse(filepath)
+
+
+# ── File serving endpoint (for Ava to display images in chat) ────────
+
+ALLOWED_SERVE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+AVA_FILES_DIR = REPO_DIR / "data" / "ava_files"
+
+@app.get("/api/files/{filename}")
+async def serve_ava_file(filename: str):
+    """Serve a file that Ava saved for display in chat."""
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "Invalid filename")
+    filepath = AVA_FILES_DIR / filename
+    if not filepath.is_file():
+        raise HTTPException(404, "File not found")
+    if filepath.suffix.lower() not in ALLOWED_SERVE_EXTENSIONS:
+        raise HTTPException(403, "File type not allowed")
     return FileResponse(filepath)
 
 
