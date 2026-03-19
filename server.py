@@ -4,13 +4,15 @@ Web API and SSE streaming endpoints.
 """
 
 import json
+import base64
 import asyncio
 from functools import partial
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 from pathlib import Path
+from typing import Optional
 
 import database as db
 from agent import stream_response, format_messages_for_api
@@ -114,24 +116,49 @@ async def _get_conv_lock(conv_id: str):
         _conv_locks.pop(conv_id, None)
 
 
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20 MB
+
 @app.post("/api/conversations/{conv_id}/messages")
-async def send_message(conv_id: str, body: SendMessageRequest):
+async def send_message(
+    conv_id: str,
+    message: str = Form(...),
+    images: list[UploadFile] = File(default=[]),
+):
     """Send a message and stream the response via SSE."""
-    # Validate conversation exists before starting the stream
+    # Validate
+    if not message.strip():
+        raise HTTPException(422, "message must not be empty")
     conv = await _db(db.get_conversation, conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
 
+    # Process uploaded images into base64
+    image_data = []
+    for img in images:
+        if img.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(422, f"Unsupported image type: {img.content_type}")
+        raw = await img.read()
+        if len(raw) > MAX_IMAGE_SIZE:
+            raise HTTPException(422, f"Image too large (max {MAX_IMAGE_SIZE // 1024 // 1024}MB)")
+        image_data.append({
+            "media_type": img.content_type,
+            "data": base64.b64encode(raw).decode("ascii"),
+        })
+
     async def event_stream():
         async with _get_conv_lock(conv_id):
-            # Save the user message
-            await _db(db.add_message, conv_id, "user", body.message)
+            # Save the user message (with images if any)
+            await _db(
+                db.add_message, conv_id, "user", message,
+                images=image_data if image_data else None,
+            )
 
             # Auto-title: re-read conversation inside lock to avoid stale snapshot
             current_conv = await _db(db.get_conversation, conv_id)
             if current_conv and current_conv["title"] == "New Conversation":
-                title = body.message[:80].strip()
-                if len(body.message) > 80:
+                title = message[:80].strip()
+                if len(message) > 80:
                     title += "..."
                 await _db(db.rename_conversation, conv_id, title)
 

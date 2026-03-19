@@ -131,7 +131,11 @@ def build_system_prompt() -> str:
 
 
 def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
-    """Convert database messages into the format expected by the API."""
+    """Convert database messages into the format expected by the API.
+
+    If a message has images, its content is converted to the multimodal
+    content-parts format: [{"type": "text", ...}, {"type": "image_url", ...}].
+    """
     api_messages = []
     for msg in db_messages:
         entry = {"role": msg["role"]}
@@ -145,6 +149,19 @@ def format_messages_for_api(db_messages: list[dict]) -> list[dict]:
         elif msg.get("tool_calls"):
             entry["content"] = msg["content"] or ""
             entry["tool_calls"] = msg["tool_calls"]
+        elif msg.get("images"):
+            # Build multimodal content parts for vision
+            parts = []
+            if msg["content"]:
+                parts.append({"type": "text", "text": msg["content"]})
+            for img in msg["images"]:
+                parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{img['media_type']};base64,{img['data']}",
+                    },
+                })
+            entry["content"] = parts
         else:
             entry["content"] = msg["content"]
         api_messages.append(entry)

@@ -37,10 +37,16 @@ def init_db():
                 content TEXT NOT NULL,
                 tool_calls TEXT,
                 tool_call_id TEXT,
+                images TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             )
         """)
+        # Migration: add images column if missing (existing databases)
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN images TEXT")
+        except Exception:
+            pass  # Column already exists
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
             ON messages(conversation_id)
@@ -118,16 +124,18 @@ def rename_conversation(conv_id: str, title: str) -> bool:
 
 
 def add_message(conversation_id: str, role: str, content: str,
-                tool_calls: list | None = None, tool_call_id: str | None = None) -> dict:
+                tool_calls: list | None = None, tool_call_id: str | None = None,
+                images: list | None = None) -> dict:
     """Add a message to a conversation."""
     content = content or ""
     now = datetime.now(timezone.utc).isoformat()
     tool_calls_json = json.dumps(tool_calls) if tool_calls else None
+    images_json = json.dumps(images) if images else None
     with get_db() as conn:
         cursor = conn.execute(
-            """INSERT INTO messages (conversation_id, role, content, tool_calls, tool_call_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (conversation_id, role, content, tool_calls_json, tool_call_id, now),
+            """INSERT INTO messages (conversation_id, role, content, tool_calls, tool_call_id, images, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (conversation_id, role, content, tool_calls_json, tool_call_id, images_json, now),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -142,6 +150,7 @@ def add_message(conversation_id: str, role: str, content: str,
         "content": content,
         "tool_calls": tool_calls,
         "tool_call_id": tool_call_id,
+        "images": images,
         "created_at": now,
     }
 
@@ -162,5 +171,10 @@ def get_messages(conversation_id: str) -> list[dict]:
             except json.JSONDecodeError:
                 print(f"WARNING: Corrupt tool_calls JSON in message {msg.get('id')}, conversation {conversation_id}")
                 msg["tool_calls"] = None
+        if msg.get("images"):
+            try:
+                msg["images"] = json.loads(msg["images"])
+            except json.JSONDecodeError:
+                msg["images"] = None
         messages.append(msg)
     return messages
