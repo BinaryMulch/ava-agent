@@ -1,500 +1,174 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Ava Agent</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        surface: { DEFAULT: '#0f0f0f', secondary: '#161616', tertiary: '#1e1e1e', hover: '#262626' },
+        accent: { DEFAULT: '#7c6df7', dim: '#6c5ce7', glow: 'rgba(124,109,247,0.12)' },
+        border: '#222',
+        tool: { bg: '#141822', border: '#1e2636' },
+      },
+      fontFamily: {
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['JetBrains Mono', 'SF Mono', 'Fira Code', 'monospace'],
+      },
+      maxWidth: { chat: '760px' },
+      animation: { fadeIn: 'fadeIn 0.2s ease' },
+      keyframes: { fadeIn: { from: { opacity: 0, transform: 'translateY(4px)' }, to: { opacity: 1, transform: 'translateY(0)' } } },
+    }
+  }
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #0f0f0f;
-    --bg-secondary: #1a1a1a;
-    --bg-tertiary: #242424;
-    --bg-hover: #2a2a2a;
-    --text: #e8e8e8;
-    --text-muted: #888;
-    --accent: #6c5ce7;
-    --accent-hover: #7c6df7;
-    --border: #2a2a2a;
-    --user-bubble: #2d2b55;
-    --assistant-bubble: #1e1e1e;
-    --tool-bg: #1a1f2e;
-    --danger: #e74c3c;
-    --danger-hover: #c0392b;
-    --sidebar-width: 280px;
-    --input-max: 720px;
-  }
+  /* ── Base overrides that Tailwind CDN can't cover ── */
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* Text size steps */
+  :root { --text-scale: 1; }
+  .msg-content { font-size: calc(0.875rem * var(--text-scale)); line-height: 1.65; }
+  .msg-content pre { font-size: calc(0.8125rem * var(--text-scale)); }
+  .msg-content code { font-size: calc(0.8125rem * var(--text-scale)); }
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    height: 100dvh;
-    display: flex;
-    overflow: hidden;
-  }
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
 
-  /* ── Sidebar ─────────────────────────────────────── */
-
-  #sidebar {
-    width: var(--sidebar-width);
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-    transition: transform 0.2s ease;
-    z-index: 100;
-  }
-
-  .sidebar-header {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .sidebar-header h1 {
-    font-size: 18px;
-    font-weight: 600;
-    flex: 1;
-  }
-
-  .sidebar-header .logo {
-    width: 28px; height: 28px;
-    background: var(--accent);
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 14px; color: #fff;
-  }
-
-  #new-chat-btn {
-    margin: 12px 16px;
-    padding: 10px 16px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: background 0.15s;
-  }
-  #new-chat-btn:hover { background: var(--accent-hover); }
-
-  #conversation-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px 8px;
-  }
-
-  .conv-item {
-    padding: 10px 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-muted);
-    transition: background 0.1s;
-    position: relative;
-  }
-  .conv-item:hover { background: var(--bg-hover); color: var(--text); }
-  .conv-item.active { background: var(--bg-tertiary); color: var(--text); }
-
-  .conv-item .conv-title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .conv-item .conv-delete {
-    display: none;
-    background: none;
-    border: none;
-    color: var(--danger);
-    cursor: pointer;
-    font-size: 16px;
-    padding: 2px 4px;
-    line-height: 1;
-    border-radius: 4px;
-  }
-  .conv-item:hover .conv-delete { display: block; }
-  .conv-item .conv-delete:hover { background: rgba(231,76,60,0.15); }
-
-  .sidebar-footer {
-    padding: 12px 16px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    gap: 8px;
-  }
-
-  .sidebar-footer button {
-    flex: 1;
-    padding: 8px;
-    background: var(--bg-tertiary);
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all 0.15s;
-  }
-  .sidebar-footer button:hover { background: var(--bg-hover); color: var(--text); }
-
-  /* ── Main chat area ──────────────────────────────── */
-
-  #main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-
-  #chat-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: var(--bg-secondary);
-  }
-
-  #menu-toggle {
-    display: none;
-    background: none;
-    border: none;
-    color: var(--text);
-    font-size: 22px;
-    cursor: pointer;
-    padding: 4px;
-  }
-
-  #chat-title {
-    flex: 1;
-    font-size: 15px;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  #messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .message {
-    max-width: var(--input-max);
-    width: 100%;
-    margin: 0 auto;
-    display: flex;
-    gap: 12px;
-    animation: fadeIn 0.2s ease;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .message .avatar {
-    width: 32px; height: 32px;
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px; font-weight: 600;
-    flex-shrink: 0;
-  }
-
-  .message.user .avatar { background: var(--user-bubble); color: #a29bfe; }
-  .message.assistant .avatar { background: var(--accent); color: #fff; }
-
-  .message .content {
-    flex: 1;
-    font-size: 14px;
-    line-height: 1.6;
-    min-width: 0;
-  }
-
-  .message .content pre {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px;
-    overflow-x: auto;
-    margin: 8px 0;
-    font-size: 13px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .message .content code {
-    background: var(--bg-tertiary);
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-size: 13px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .message .content pre code {
-    background: none;
-    padding: 0;
-  }
-
-  .message .content h1,
-  .message .content h2,
-  .message .content h3,
-  .message .content h4,
-  .message .content h5,
-  .message .content h6 {
-    margin: 12px 0 6px;
-    line-height: 1.3;
-  }
-  .message .content h1 { font-size: 1.4em; }
-  .message .content h2 { font-size: 1.25em; }
-  .message .content h3 { font-size: 1.1em; }
-
-  .message .content ul,
-  .message .content ol {
-    margin: 6px 0;
-    padding-left: 24px;
-  }
-  .message .content li { margin: 2px 0; }
-
-  .message .content blockquote {
-    border-left: 3px solid var(--accent);
-    padding: 4px 12px;
-    margin: 6px 0;
-    color: var(--text-muted);
-  }
-
-  .tool-block {
-    background: var(--tool-bg);
-    border: 1px solid #2a3040;
-    border-radius: 8px;
-    margin: 8px 0;
-    overflow: hidden;
-  }
-
-  .tool-header {
-    padding: 8px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--accent);
-    background: rgba(108,92,231,0.08);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-  }
-
-  .tool-header .arrow {
-    transition: transform 0.2s;
-    font-size: 10px;
-  }
-  .tool-header .arrow.open { transform: rotate(90deg); }
-
-  .tool-body {
-    display: none;
-    padding: 10px 12px;
-    font-size: 12px;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    max-height: 300px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
-    color: #ccc;
-  }
-  .tool-body.open { display: block; }
-
-  /* ── Welcome screen ──────────────────────────────── */
-
-  #welcome {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    gap: 16px;
-    padding: 32px;
-    text-align: center;
-  }
-
-  #welcome .logo-big {
-    width: 64px; height: 64px;
-    background: var(--accent);
-    border-radius: 16px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 28px; font-weight: 700; color: #fff;
-  }
-
-  #welcome h2 { color: var(--text); font-size: 22px; font-weight: 600; }
-  #welcome p { font-size: 14px; max-width: 400px; }
-
-  /* ── Input area ──────────────────────────────────── */
-
-  #input-area {
-    padding: 16px;
-    background: var(--bg);
-    border-top: 1px solid var(--border);
-  }
-
-  #input-wrapper {
-    max-width: var(--input-max);
-    margin: 0 auto;
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-  }
-
-  #message-input {
-    flex: 1;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 12px 16px;
-    color: var(--text);
-    font-size: 14px;
-    font-family: inherit;
-    resize: none;
-    max-height: 200px;
-    line-height: 1.5;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  #message-input:focus { border-color: var(--accent); }
-  #message-input::placeholder { color: var(--text-muted); }
-
-  #send-btn {
-    width: 44px; height: 44px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 12px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s;
-    flex-shrink: 0;
-  }
-  #send-btn:hover { background: var(--accent-hover); }
-  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  #send-btn svg {
-    width: 20px; height: 20px;
-  }
-
-  .typing-indicator {
-    display: inline-flex;
-    gap: 4px;
-    padding: 4px 0;
-  }
-  .typing-indicator span {
-    width: 6px; height: 6px;
-    background: var(--text-muted);
-    border-radius: 50%;
-    animation: bounce 1.2s infinite;
-  }
-  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
-  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
-
+  /* Typing animation */
+  .typing-dot { animation: bounce 1.2s infinite; }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes bounce {
     0%, 60%, 100% { transform: translateY(0); }
-    30% { transform: translateY(-6px); }
+    30% { transform: translateY(-5px); }
   }
 
-  /* ── Overlay for mobile sidebar ──────────────────── */
+  /* Tool block expand */
+  .tool-body { display: none; }
+  .tool-body.open { display: block; }
+  .tool-arrow { transition: transform 0.2s; }
+  .tool-arrow.open { transform: rotate(90deg); }
 
-  #overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    z-index: 99;
+  /* Textarea auto-height */
+  #message-input { field-sizing: content; }
+
+  /* Markdown content styles */
+  .msg-content h1, .msg-content h2, .msg-content h3,
+  .msg-content h4, .msg-content h5, .msg-content h6 {
+    margin: 14px 0 6px; line-height: 1.3; font-weight: 600;
   }
+  .msg-content h1 { font-size: 1.35em; }
+  .msg-content h2 { font-size: 1.2em; }
+  .msg-content h3 { font-size: 1.08em; }
+  .msg-content ul, .msg-content ol { margin: 6px 0; padding-left: 22px; }
+  .msg-content li { margin: 3px 0; }
+  .msg-content blockquote {
+    border-left: 3px solid #7c6df7; padding: 4px 14px; margin: 8px 0; color: #888;
+  }
+  .msg-content pre {
+    background: #1a1a1a; border: 1px solid #262626; border-radius: 8px;
+    padding: 14px; overflow-x: auto; margin: 10px 0;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .msg-content code {
+    background: #1e1e1e; padding: 2px 6px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .msg-content pre code { background: none; padding: 0; }
 
-  /* ── Mobile responsive ───────────────────────────── */
-
+  /* Transition for sidebar */
   @media (max-width: 768px) {
-    #sidebar {
-      position: fixed;
-      top: 0; left: 0; bottom: 0;
-      transform: translateX(-100%);
-    }
+    #sidebar { transform: translateX(-100%); }
     #sidebar.open { transform: translateX(0); }
-    #overlay.open { display: block; }
-    #menu-toggle { display: block; }
-
-    #messages { padding: 12px 8px; }
-    .message { gap: 8px; }
-    .message .avatar { width: 28px; height: 28px; font-size: 12px; }
-    .message .content { font-size: 14px; }
-
-    #input-wrapper { gap: 8px; }
-    #message-input { padding: 10px 12px; border-radius: 10px; }
-    #send-btn { width: 40px; height: 40px; border-radius: 10px; }
   }
-
-  /* ── Scrollbar ───────────────────────────────────── */
-
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #444; }
 </style>
 </head>
-<body>
+<body class="bg-surface text-gray-200 h-dvh flex overflow-hidden font-sans">
 
 <!-- Sidebar -->
-<div id="sidebar">
-  <div class="sidebar-header">
-    <div class="logo">A</div>
-    <h1>Ava</h1>
+<aside id="sidebar" class="w-72 bg-surface-secondary border-r border-border flex flex-col flex-shrink-0 transition-transform duration-200 ease-in-out z-50 fixed md:relative top-0 left-0 bottom-0">
+  <!-- Logo + brand -->
+  <div class="flex items-center gap-3 px-5 py-4 border-b border-border">
+    <div class="w-8 h-8 rounded-lg bg-accent flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-accent/20">A</div>
+    <h1 class="text-base font-semibold text-gray-100 tracking-tight">Ava Agent</h1>
   </div>
-  <button id="new-chat-btn">+ New Chat</button>
-  <div id="conversation-list"></div>
-  <div class="sidebar-footer">
-    <button id="update-btn" title="Pull updates from GitHub and restart">Update Agent</button>
+
+  <!-- New chat button -->
+  <div class="px-3 pt-3 pb-1">
+    <button id="new-chat-btn" class="w-full py-2.5 px-4 bg-accent/10 hover:bg-accent/20 text-accent border border-accent/20 rounded-lg text-sm font-medium transition-all duration-150 active:scale-[0.98]">
+      + New Chat
+    </button>
   </div>
-</div>
+
+  <!-- Conversation list -->
+  <div id="conversation-list" class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5"></div>
+
+  <!-- Footer -->
+  <div class="px-3 py-3 border-t border-border">
+    <button id="update-btn" title="Pull updates from GitHub and restart" class="w-full py-2 px-3 bg-surface-tertiary hover:bg-surface-hover text-gray-500 hover:text-gray-300 border border-border rounded-lg text-xs font-medium transition-all duration-150">
+      Update Agent
+    </button>
+  </div>
+</aside>
 
 <!-- Overlay for mobile -->
-<div id="overlay"></div>
+<div id="overlay" class="hidden fixed inset-0 bg-black/50 z-40"></div>
 
 <!-- Main -->
-<div id="main">
-  <div id="chat-header">
-    <button id="menu-toggle">&#9776;</button>
-    <div id="chat-title">Ava Agent</div>
-  </div>
-  <div id="messages">
-    <div id="welcome">
-      <div class="logo-big">A</div>
-      <h2>Ava Agent</h2>
-      <p>Your AI assistant with full system access. Ask me to manage files, install packages, configure services, or anything else.</p>
+<main id="main" class="flex-1 flex flex-col min-w-0">
+  <!-- Header -->
+  <header id="chat-header" class="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface-secondary/80 backdrop-blur-sm">
+    <button id="menu-toggle" class="hidden md:hidden bg-transparent border-none text-gray-300 hover:text-white text-xl cursor-pointer p-1">&#9776;</button>
+    <div id="chat-title" class="flex-1 text-sm font-medium text-gray-300 truncate">Ava Agent</div>
+
+    <!-- Text size control -->
+    <div class="flex items-center gap-1 bg-surface-tertiary rounded-lg border border-border px-1 py-0.5">
+      <button id="text-smaller" title="Decrease text size" class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-gray-200 hover:bg-surface-hover transition-colors text-xs font-bold">A-</button>
+      <div class="w-px h-4 bg-border"></div>
+      <button id="text-larger" title="Increase text size" class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 hover:text-gray-200 hover:bg-surface-hover transition-colors text-sm font-bold">A+</button>
+    </div>
+  </header>
+
+  <!-- Messages -->
+  <div id="messages" class="flex-1 overflow-y-auto px-4 py-6 flex flex-col gap-5 md:px-6">
+    <div id="welcome" class="flex-1 flex flex-col items-center justify-center text-center gap-4 px-6">
+      <div class="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center text-white font-bold text-3xl shadow-xl shadow-accent/25">A</div>
+      <h2 class="text-xl font-semibold text-gray-100">Ava Agent</h2>
+      <p class="text-sm text-gray-500 max-w-sm leading-relaxed">Your AI assistant with full system access. Ask me to manage files, install packages, configure services, or anything else.</p>
     </div>
   </div>
-  <div id="input-area">
-    <div id="input-wrapper">
-      <textarea id="message-input" rows="1" placeholder="Message Ava..." autofocus></textarea>
-      <button id="send-btn" title="Send">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+
+  <!-- Input area -->
+  <div id="input-area" class="px-4 py-4 border-t border-border bg-surface">
+    <div id="input-wrapper" class="max-w-chat mx-auto flex gap-3 items-end">
+      <textarea id="message-input" rows="1"
+        placeholder="Message Ava..."
+        autofocus
+        class="flex-1 bg-surface-secondary border border-border rounded-xl px-4 py-3 text-gray-200 text-sm font-sans resize-none max-h-52 leading-relaxed outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all placeholder:text-gray-600"
+      ></textarea>
+      <button id="send-btn" title="Send"
+        class="w-11 h-11 bg-accent hover:bg-accent-dim text-white rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-150 active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed shadow-lg shadow-accent/20">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 2L11 13"></path>
           <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
         </svg>
       </button>
     </div>
   </div>
-</div>
+</main>
 
 <script>
 (function() {
@@ -503,6 +177,15 @@
   let isStreaming = false;
   let activeReader = null;
   let streamGeneration = 0;
+
+  // Text scale: 5 steps from 0.85 to 1.25
+  const TEXT_STEPS = [0.8, 0.9, 1.0, 1.1, 1.25];
+  let textStepIdx = parseInt(localStorage.getItem('ava-text-step') || '2');
+  function applyTextScale() {
+    document.documentElement.style.setProperty('--text-scale', TEXT_STEPS[textStepIdx]);
+    localStorage.setItem('ava-text-step', textStepIdx);
+  }
+  applyTextScale();
 
   function abortStream() {
     if (activeReader) {
@@ -525,6 +208,12 @@
   const input = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
   const updateBtn = document.getElementById('update-btn');
+  const textSmaller = document.getElementById('text-smaller');
+  const textLarger = document.getElementById('text-larger');
+
+  // ── Text size controls ─────────────────────────────
+  textSmaller.onclick = () => { if (textStepIdx > 0) { textStepIdx--; applyTextScale(); } };
+  textLarger.onclick = () => { if (textStepIdx < TEXT_STEPS.length - 1) { textStepIdx++; applyTextScale(); } };
 
   // ── Sidebar toggle (mobile) ────────────────────────
   menuToggle.onclick = () => { sidebar.classList.add('open'); overlay.classList.add('open'); };
@@ -551,10 +240,11 @@
     convList.innerHTML = '';
     convs.forEach(c => {
       const el = document.createElement('div');
-      el.className = 'conv-item' + (c.id === currentConvId ? ' active' : '');
+      const isActive = c.id === currentConvId;
+      el.className = `group flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer text-[13px] transition-colors duration-100 ${isActive ? 'bg-surface-tertiary text-gray-200' : 'text-gray-500 hover:bg-surface-hover hover:text-gray-300'}`;
       el.innerHTML = `
-        <span class="conv-title">${escapeHtml(c.title)}</span>
-        <button class="conv-delete" title="Delete">&times;</button>
+        <span class="conv-title flex-1 truncate">${escapeHtml(c.title)}</span>
+        <button class="conv-delete hidden group-hover:flex items-center justify-center w-5 h-5 rounded text-red-500/70 hover:text-red-400 hover:bg-red-500/10 text-sm leading-none transition-colors">&times;</button>
       `;
       el.querySelector('.conv-title').onclick = () => openConversation(c.id);
       el.querySelector('.conv-delete').onclick = async (e) => {
@@ -595,12 +285,10 @@
         appendMessage('user', msg.content);
       } else if (msg.role === 'assistant') {
         if (msg.tool_calls && msg.tool_calls.length > 0) {
-          // Assistant message with tool calls — render tool blocks
           msg.tool_calls.forEach(tc => {
             const args = tc.function.arguments;
             let argsObj;
             try { argsObj = typeof args === 'string' ? JSON.parse(args) : args; } catch { argsObj = { raw: args }; }
-            // Find the matching tool result
             const resultMsg = messages.find(m => m.role === 'tool' && m.tool_call_id === tc.id);
             const result = resultMsg ? resultMsg.content : '';
             appendToolBlock(tc.function.name, argsObj, result);
@@ -610,7 +298,6 @@
           appendMessage('assistant', msg.content);
         }
       }
-      // Skip tool messages (already consumed above)
       i++;
     }
     scrollToBottom();
@@ -619,11 +306,15 @@
   function appendMessage(role, content) {
     welcomeEl?.remove();
     const el = document.createElement('div');
-    el.className = `message ${role}`;
-    const avatar = role === 'user' ? 'U' : 'A';
+    el.className = `max-w-chat w-full mx-auto flex gap-3 animate-fadeIn ${role === 'user' ? '' : ''}`;
+
+    const avatarClass = role === 'user'
+      ? 'bg-indigo-900/60 text-indigo-300'
+      : 'bg-accent text-white shadow-md shadow-accent/15';
+
     el.innerHTML = `
-      <div class="avatar">${avatar}</div>
-      <div class="content">${role === 'user' ? escapeHtml(content) : renderMarkdown(content)}</div>
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-semibold flex-shrink-0 ${avatarClass}">${role === 'user' ? 'U' : 'A'}</div>
+      <div class="msg-content flex-1 min-w-0 text-gray-300">${role === 'user' ? escapeHtml(content) : renderMarkdown(content)}</div>
     `;
     messagesEl.appendChild(el);
     return el;
@@ -632,7 +323,7 @@
   function appendToolBlock(name, args, result) {
     welcomeEl?.remove();
     const el = document.createElement('div');
-    el.className = 'message assistant';
+    el.className = 'max-w-chat w-full mx-auto flex gap-3 animate-fadeIn';
     let commandStr = '';
     if (name === 'execute_command' && args.command) {
       commandStr = args.command;
@@ -654,14 +345,14 @@
     }
 
     el.innerHTML = `
-      <div class="avatar">A</div>
-      <div class="content">
-        <div class="tool-block">
-          <div class="tool-header" onclick="this.querySelector('.arrow').classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
-            <span class="arrow">&#9654;</span>
-            <span>$ ${escapeHtml(commandStr.substring(0, 80))}${commandStr.length > 80 ? '...' : ''}</span>
+      <div class="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center text-xs font-semibold flex-shrink-0 shadow-md shadow-accent/15">A</div>
+      <div class="flex-1 min-w-0">
+        <div class="bg-tool-bg border border-tool-border rounded-lg overflow-hidden">
+          <div class="tool-header flex items-center gap-2 px-3 py-2 text-xs font-semibold text-accent bg-accent/[0.06] cursor-pointer select-none" onclick="this.querySelector('.tool-arrow').classList.toggle('open'); this.nextElementSibling.classList.toggle('open');">
+            <span class="tool-arrow text-[10px]">&#9654;</span>
+            <span class="font-mono truncate">$ ${escapeHtml(commandStr.substring(0, 80))}${commandStr.length > 80 ? '...' : ''}</span>
           </div>
-          <div class="tool-body">${escapeHtml(resultDisplay.trim() || '(no output)')}</div>
+          <div class="tool-body px-3 py-2.5 text-xs font-mono max-h-72 overflow-y-auto whitespace-pre-wrap break-all text-gray-400">${escapeHtml(resultDisplay.trim() || '(no output)')}</div>
         </div>
       </div>
     `;
@@ -673,11 +364,9 @@
     const text = input.value.trim();
     if (!text || isStreaming) return;
 
-    // Guard against double-submit before any async work
     isStreaming = true;
     sendBtn.disabled = true;
 
-    // Create conversation if needed
     if (!currentConvId) {
       try {
         const conv = await api('POST', '/api/conversations');
@@ -690,15 +379,13 @@
       }
     }
 
-    // Show user message
     appendMessage('user', text);
     input.value = '';
     autoResize();
     scrollToBottom();
 
-    // Show typing indicator
     const typingEl = appendMessage('assistant', '');
-    typingEl.querySelector('.content').innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+    typingEl.querySelector('.msg-content').innerHTML = '<div class="flex gap-1.5 py-1"><span class="typing-dot w-1.5 h-1.5 bg-gray-500 rounded-full"></span><span class="typing-dot w-1.5 h-1.5 bg-gray-500 rounded-full"></span><span class="typing-dot w-1.5 h-1.5 bg-gray-500 rounded-full"></span></div>';
     const myGeneration = ++streamGeneration;
 
     try {
@@ -742,7 +429,7 @@
             rafPending = true;
             requestAnimationFrame(() => {
               const el = messagesEl.querySelector('.streaming-msg');
-              if (el) el.querySelector('.content').innerHTML = renderMarkdown(fullContent);
+              if (el) el.querySelector('.msg-content').innerHTML = renderMarkdown(fullContent);
               scrollToBottom();
               rafPending = false;
             });
@@ -795,7 +482,6 @@
         }
       }
 
-      // Drain any remaining data in buffer after stream ends
       if (buffer.trim()) {
         const remaining = buffer.split('\n');
         for (const line of remaining) {
@@ -806,7 +492,7 @@
       if (myGeneration !== streamGeneration) return;
       typingEl?.remove();
       const errEl = appendMessage('assistant', '');
-      errEl.querySelector('.content').textContent = `Connection error: ${err.message}`;
+      errEl.querySelector('.msg-content').textContent = `Connection error: ${err.message}`;
     }
 
     isStreaming = false;
@@ -821,10 +507,10 @@
   function showWelcome() {
     chatTitle.textContent = 'Ava Agent';
     messagesEl.innerHTML = `
-      <div id="welcome">
-        <div class="logo-big">A</div>
-        <h2>Ava Agent</h2>
-        <p>Your AI assistant with full system access. Ask me to manage files, install packages, configure services, or anything else.</p>
+      <div id="welcome" class="flex-1 flex flex-col items-center justify-center text-center gap-4 px-6">
+        <div class="w-16 h-16 rounded-2xl bg-accent flex items-center justify-center text-white font-bold text-3xl shadow-xl shadow-accent/25">A</div>
+        <h2 class="text-xl font-semibold text-gray-100">Ava Agent</h2>
+        <p class="text-sm text-gray-500 max-w-sm leading-relaxed">Your AI assistant with full system access. Ask me to manage files, install packages, configure services, or anything else.</p>
       </div>
     `;
     welcomeEl = document.getElementById('welcome');
@@ -842,8 +528,6 @@
 
   function renderMarkdown(text) {
     if (!text) return '';
-    // Step 1: Extract fenced code blocks and inline code BEFORE escaping.
-    // Store raw content with our own escaping to avoid double-encoding.
     const codeBlocks = [];
     let raw = text;
     raw = raw.replace(/(^|\n)```(\w*)\n([\s\S]*?)\n```/g, (_, pre, lang, code) => {
@@ -856,24 +540,17 @@
       codeBlocks.push(`<code>${escapeHtml(code)}</code>`);
       return `\x00CODEBLOCK${idx}\x00`;
     });
-    // Step 2: Escape the remaining text (all user content outside code)
     let html = escapeHtml(raw);
-    // Step 3: Apply structural markdown transforms on escaped text
-    // Bold + italic (***text***)
     html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
-    // Bold
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    // Italic
     html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // Process line-level elements (headers, lists, blockquotes)
     const lines = html.split('\n');
     const processed = [];
-    let inList = null; // 'ul' or 'ol'
+    let inList = null;
     let inBlockquote = false;
     let bqContent = [];
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      // Headers
       const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
       if (headerMatch) {
         if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
@@ -882,7 +559,6 @@
         processed.push(`<h${level}>${headerMatch[2]}</h${level}>`);
         continue;
       }
-      // Unordered list items
       const ulMatch = line.match(/^[\-\*]\s+(.+)$/);
       if (ulMatch) {
         if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
@@ -894,7 +570,6 @@
         processed.push(`<li>${ulMatch[1]}</li>`);
         continue;
       }
-      // Ordered list items
       const olMatch = line.match(/^\d+\.\s+(.+)$/);
       if (olMatch) {
         if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
@@ -906,7 +581,6 @@
         processed.push(`<li>${olMatch[1]}</li>`);
         continue;
       }
-      // Blockquotes (already escaped, so > is &gt;)
       const bqMatch = line.match(/^&gt;\s?(.*)$/);
       if (bqMatch) {
         if (inList) { processed.push(`</${inList}>`); inList = null; }
@@ -914,21 +588,18 @@
         bqContent.push(bqMatch[1]);
         continue;
       }
-      // Regular line
       if (inBlockquote) { processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`); bqContent = []; inBlockquote = false; }
       if (inList) { processed.push(`</${inList}>`); inList = null; }
       processed.push(line);
     }
     if (inBlockquote) processed.push(`<blockquote>${bqContent.join('<br>')}</blockquote>`);
     if (inList) processed.push(`</${inList}>`);
-    // Join with <br>, but don't add <br> after block elements
     html = processed.reduce((acc, line, i) => {
       if (i === 0) return line;
       const blockTags = /^<(h[1-6]|ul|ol|li|\/ul|\/ol|blockquote)/;
       if (blockTags.test(line) || blockTags.test(processed[i - 1])) return acc + line;
       return acc + '<br>' + line;
     }, '');
-    // Step 4: Restore code block placeholders
     html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, idx) => codeBlocks[parseInt(idx)]);
     return html;
   }
@@ -973,6 +644,12 @@
     updateBtn.textContent = 'Update Agent';
     updateBtn.disabled = false;
   };
+
+  // ── Mobile: show menu toggle ───────────────────────
+  const mql = window.matchMedia('(max-width: 768px)');
+  function handleMobile(e) { menuToggle.style.display = e.matches ? 'block' : 'none'; }
+  handleMobile(mql);
+  mql.addEventListener('change', handleMobile);
 
   // ── Init ───────────────────────────────────────────
   loadConversations();
