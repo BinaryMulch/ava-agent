@@ -298,6 +298,7 @@ async def stream_response(messages: list[dict]):
             model=XAI_MODEL,
             messages=conversation,
             tools=TOOLS,
+            max_tokens=16384,
             stream=True,
         )
 
