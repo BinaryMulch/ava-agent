@@ -377,7 +377,7 @@ tailwind.config = {
         } else {
           return '';
         }
-        return `<img src="${escapeHtml(src)}" class="max-w-48 max-h-48 rounded-lg object-cover" alt="uploaded image">`;
+        return `<img src="${escapeHtml(src)}" class="max-w-48 max-h-48 rounded-lg object-cover" alt="uploaded image" onerror="this.style.display='none'">`;
       }).join('');
       imageHtml = `<div class="flex flex-wrap gap-2 ${content ? 'mb-2' : ''}">${imgs}</div>`;
     }
@@ -650,7 +650,7 @@ tailwind.config = {
     // Extract markdown images before escaping: ![alt](url)
     raw = raw.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, url) => {
       const idx = codeBlocks.length;
-      codeBlocks.push(`<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" class="max-w-full rounded-lg my-2" loading="lazy">`);
+      codeBlocks.push(`<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" class="max-w-full rounded-lg my-2" loading="lazy" onerror="this.style.display='none'">`);
       return `\x00CODEBLOCK${idx}\x00`;
     });
     let html = escapeHtml(raw);
